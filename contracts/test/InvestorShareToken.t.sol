@@ -40,7 +40,7 @@ contract InvestorShareTokenTest is Test {
     // Constructor tests
     // -------------------------------------------------
 
-    function testConstructorSetsValues() public {
+    function testConstructorSetsValues() public view {
         assertEq(token.assetId(), assetId);
         assertEq(token.maxSupply(), maxSupply);
         assertEq(token.registry(), address(registry));
