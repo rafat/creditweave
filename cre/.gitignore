@@ -1,0 +1,35 @@
+# Environment variables
+.env
+.env.*
+
+# Node / Bun
+node_modules/
+bun.lockb
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
+
+# Build outputs
+dist/
+.build/
+
+# CRE simulation artifacts
+.simulation/
+.simulator/
+
+# Local logs
+logs/
+*.log
+
+# Secrets mapping backups
+secrets.local.yaml
+
+# IDE
+.vscode/
+
+# Mac
+.DS_Store
+
+# Build artifacts
+tmp.js
+tmp.wasm
