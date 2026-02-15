@@ -26,4 +26,12 @@ contract MockUnderwriting {
     {
         return (approved, maxLtvBps, rateBps, expiry, bytes32(0));
     }
+
+    function isApproved(address, uint256)
+        external
+        view
+        returns (bool)
+    {
+        return approved && expiry > block.timestamp;
+    }
 }

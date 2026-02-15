@@ -6,19 +6,24 @@ import "../../src/RWACommonTypes.sol";
 
 contract MockCashFlowLogic is ICashFlowLogic {
     uint256 public expected;
+    CashflowHealth public currentHealth = CashflowHealth.PERFORMING;
 
     constructor(uint256 _expected) {
         expected = _expected;
     }
 
+    function setHealth(CashflowHealth health) external {
+        currentHealth = health;
+    }
+
     function initialize(bytes calldata) external override {}
 
-    function getAssetStatus() external pure override returns (RWACommonTypes.AssetStatus) {
+    function getAssetStatus() external view override returns (RWACommonTypes.AssetStatus) {
         return RWACommonTypes.AssetStatus.ACTIVE;
     }
 
-    function getCashflowHealth() external pure override returns (CashflowHealth) {
-        return CashflowHealth.PERFORMING;
+    function getCashflowHealth() external view override returns (CashflowHealth) {
+        return currentHealth;
     }
 
     function getExpectedPayment(uint256) external pure override returns (PaymentStatus memory) {
@@ -50,13 +55,13 @@ contract MockCashFlowLogic is ICashFlowLogic {
         return RWACommonTypes.AssetStatus.ACTIVE;
     }
 
-    function evaluateDefault(uint256) external pure override returns (RWACommonTypes.AssetStatus, CashflowHealth) {
-        return (RWACommonTypes.AssetStatus.ACTIVE, CashflowHealth.PERFORMING);
+    function evaluateDefault(uint256) external view override returns (RWACommonTypes.AssetStatus, CashflowHealth) {
+        return (RWACommonTypes.AssetStatus.ACTIVE, currentHealth);
     }
 
     function previewDefault(uint256)
         external
-        pure
+        view
         override
         returns (
             RWACommonTypes.AssetStatus newStatus,
@@ -65,7 +70,7 @@ contract MockCashFlowLogic is ICashFlowLogic {
             uint256 period
         )
     {
-        return (RWACommonTypes.AssetStatus.ACTIVE, CashflowHealth.PERFORMING, 0, 0);
+        return (RWACommonTypes.AssetStatus.ACTIVE, currentHealth, 0, 0);
     }
 
     function forceDefault() external pure override returns (bool) { return false; }

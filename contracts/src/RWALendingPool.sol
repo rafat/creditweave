@@ -2,217 +2,344 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
 
-interface IUnderwritingRegistry {
-    function getTerms(address borrower, uint256 assetId)
-        external
-        view
-        returns (bool, uint16, uint16, uint256, bytes32);
-}
+import "./UnderwritingRegistry.sol";
+import "./NAVOracle.sol";
+import "./interface/ICashFlowLogic.sol";
 
-interface IRWAAssetRegistryView {
-    function assets(uint256 assetId)
-        external
-        view
-        returns (
-            uint256,
-            uint8,
-            address,
-            address,
-            address,
-            address,
-            bool,
-            bool,
-            uint256 assetValue,
-            uint256,
-            uint256,
-            uint256,
-            uint256,
-            uint256,
-            uint256,
-            uint256,
-            uint256,
-            uint256,
-            address,
-            uint8,
-            uint8,
-            uint256,
-            uint256,
-            string memory
-        );
-}
+contract RWALendingPool is ReentrancyGuard, Ownable {
 
-contract RWALendingPool {
-    IERC20 public immutable stable;
-    IUnderwritingRegistry public immutable underwriting;
-    IRWAAssetRegistryView public immutable registry;
+    // ------------------------------------------------------------
+    // Core Dependencies
+    // ------------------------------------------------------------
 
-    struct Loan {
-        uint256 principal;
-        uint256 rateBps;
-        uint256 lastAccrual;
-    }
+    IERC20 public immutable stablecoin;
+    UnderwritingRegistry public immutable registry;
+    NAVOracle public immutable navOracle;
 
-    mapping(address => mapping(uint256 => Loan)) public loans;
+    // ------------------------------------------------------------
+    // Storage
+    // ------------------------------------------------------------
 
-    event Borrowed(address indexed borrower, uint256 indexed assetId, uint256 amount);
-    event Repaid(address indexed borrower, uint256 indexed assetId, uint256 amount);
+    // user => assetId => collateral shares
+    mapping(address => mapping(uint256 => uint256)) public collateral;
+
+    // user => assetId => debt in stablecoin units
+    mapping(address => mapping(uint256 => uint256)) public debt;
+
+    // assetId => share token address
+    mapping(uint256 => address) public assetIdToToken;
+
+    // assetId => cashflow logic
+    mapping(uint256 => address) public assetIdToLogic;
+
+    // 10500 = 105% (5% bonus)
+    uint256 public liquidationBonusBps = 10500;
+
+    // health factor < 0.95e18 → liquidatable
+    uint256 public constant LIQUIDATION_THRESHOLD = 0.95e18;
+
+    // ------------------------------------------------------------
+    // Events
+    // ------------------------------------------------------------
+
+    event CollateralDeposited(address indexed user, uint256 indexed assetId, uint256 amount);
+    event CollateralWithdrawn(address indexed user, uint256 indexed assetId, uint256 amount);
+    event Borrowed(address indexed user, uint256 indexed assetId, uint256 amount);
+    event Repaid(address indexed user, uint256 indexed assetId, uint256 amount);
+    event Liquidated(
+        address indexed user,
+        uint256 indexed assetId,
+        uint256 debtRepaid,
+        uint256 collateralSeized
+    );
+
+    event AssetTokenSet(uint256 indexed assetId, address token);
+    event AssetLogicSet(uint256 indexed assetId, address logic);
+    event LiquidationBonusUpdated(uint256 oldBonus, uint256 newBonus);
+
+    // ------------------------------------------------------------
+    // Constructor
+    // ------------------------------------------------------------
 
     constructor(
         address _stable,
-        address _underwriting,
-        address _registry
-    ) {
-        stable = IERC20(_stable);
-        underwriting = IUnderwritingRegistry(_underwriting);
-        registry = IRWAAssetRegistryView(_registry);
+        address _registry,
+        address _navOracle
+    ) Ownable(msg.sender) {
+        require(_stable != address(0), "Invalid stable");
+        require(_registry != address(0), "Invalid registry");
+        require(_navOracle != address(0), "Invalid oracle");
+
+        stablecoin = IERC20(_stable);
+        registry = UnderwritingRegistry(_registry);
+        navOracle = NAVOracle(_navOracle);
     }
 
-    // ------------------------------------------------------------
-    // Borrow
-    // ------------------------------------------------------------
+    // ============================================================
+    // Collateral
+    // ============================================================
 
-    function borrow(uint256 assetId, uint256 amount) external {
+    function depositCollateral(
+        uint256 assetId,
+        uint256 amount
+    ) external nonReentrant {
         require(amount > 0, "Invalid amount");
 
-        (
-            bool approved,
-            uint16 maxLtvBps,
-            uint16 rateBps,
-            uint256 expiry
-        ) = _getUnderwriting(assetId);
+        address token = assetIdToToken[assetId];
+        require(token != address(0), "Asset not configured");
 
-        require(approved, "Not approved");
-        require(expiry > block.timestamp, "Underwriting expired");
+        IERC20(token).transferFrom(msg.sender, address(this), amount);
 
-        uint256 assetValue = _getAssetValue(assetId);
-        uint256 maxBorrow = (assetValue * maxLtvBps) / 10_000;
+        collateral[msg.sender][assetId] += amount;
 
-        Loan storage loan = loans[msg.sender][assetId];
+        emit CollateralDeposited(msg.sender, assetId, amount);
+    }
 
-        _accrueInterest(loan);
+    function withdrawCollateral(
+        uint256 assetId,
+        uint256 amount
+    ) external nonReentrant {
+        require(amount > 0, "Invalid amount");
+        require(collateral[msg.sender][assetId] >= amount, "Insufficient collateral");
 
-        require(loan.principal + amount <= maxBorrow, "Exceeds LTV");
+        collateral[msg.sender][assetId] -= amount;
 
-        loan.principal += amount;
-        loan.rateBps = rateBps;
-        loan.lastAccrual = block.timestamp;
+        require(
+            healthFactor(msg.sender, assetId) >= 1e18,
+            "Would become unhealthy"
+        );
 
-        require(stable.transfer(msg.sender, amount), "Transfer failed");
+        address token = assetIdToToken[assetId];
+        IERC20(token).transfer(msg.sender, amount);
+
+        emit CollateralWithdrawn(msg.sender, assetId, amount);
+    }
+
+    // ============================================================
+    // Borrow / Repay
+    // ============================================================
+
+    function borrow(
+        uint256 assetId,
+        uint256 amount
+    ) external nonReentrant {
+        require(amount > 0, "Invalid borrow");
+        require(registry.isApproved(msg.sender, assetId), "Not approved");
+
+        uint256 maxBorrow = _maxBorrowable(msg.sender, assetId);
+
+        require(
+            debt[msg.sender][assetId] + amount <= maxBorrow,
+            "Exceeds LTV"
+        );
+
+        debt[msg.sender][assetId] += amount;
+
+        stablecoin.transfer(msg.sender, amount);
 
         emit Borrowed(msg.sender, assetId, amount);
     }
 
-    // ------------------------------------------------------------
-    // Repay
-    // ------------------------------------------------------------
+    function repay(
+        uint256 assetId,
+        uint256 amount
+    ) external nonReentrant {
+        require(amount > 0, "Invalid repay");
 
-    function repay(uint256 assetId, uint256 amount) external {
-        Loan storage loan = loans[msg.sender][assetId];
-        require(loan.principal > 0, "No loan");
+        uint256 userDebt = debt[msg.sender][assetId];
+        require(userDebt > 0, "No debt");
 
-        _accrueInterest(loan);
+        stablecoin.transferFrom(msg.sender, address(this), amount);
 
-        require(stable.transferFrom(msg.sender, address(this), amount), "Transfer failed");
-
-        if (amount >= loan.principal) {
-            loan.principal = 0;
+        if (amount >= userDebt) {
+            debt[msg.sender][assetId] = 0;
         } else {
-            loan.principal -= amount;
+            debt[msg.sender][assetId] = userDebt - amount;
         }
-
-        loan.lastAccrual = block.timestamp;
 
         emit Repaid(msg.sender, assetId, amount);
     }
 
-    // ------------------------------------------------------------
-    // View
-    // ------------------------------------------------------------
+    // ============================================================
+    // Liquidation
+    // ============================================================
 
-    function getOutstanding(address borrower, uint256 assetId)
-        external
+    function liquidate(
+        address user,
+        uint256 assetId,
+        uint256 repayAmount
+    ) external nonReentrant {
+        require(
+            healthFactor(user, assetId) < LIQUIDATION_THRESHOLD,
+            "Healthy position"
+        );
+
+        uint256 userDebt = debt[user][assetId];
+        require(userDebt > 0, "No debt");
+
+        if (repayAmount > userDebt) {
+            repayAmount = userDebt;
+        }
+
+        // Liquidator repays debt
+        stablecoin.transferFrom(msg.sender, address(this), repayAmount);
+
+        debt[user][assetId] -= repayAmount;
+
+        // Calculate collateral equivalent in shares
+        uint256 nav = _getFreshNAV(assetId);
+
+        // USD value with bonus
+        uint256 usdWithBonus =
+            (repayAmount * liquidationBonusBps) / 10_000;
+
+        // Convert USD → shares
+        uint256 sharesToSeize =
+            (usdWithBonus * 1e18) / nav;
+
+        uint256 userCollateral = collateral[user][assetId];
+
+        if (sharesToSeize > userCollateral) {
+            sharesToSeize = userCollateral;
+        }
+
+        collateral[user][assetId] -= sharesToSeize;
+
+        address token = assetIdToToken[assetId];
+        IERC20(token).transfer(msg.sender, sharesToSeize);
+
+        emit Liquidated(user, assetId, repayAmount, sharesToSeize);
+    }
+
+    // ============================================================
+    // View Logic
+    // ============================================================
+
+    function healthFactor(
+        address user,
+        uint256 assetId
+    ) public view returns (uint256) {
+        uint256 userDebt = debt[user][assetId];
+        if (userDebt == 0) return type(uint256).max;
+
+        uint256 maxBorrow = _maxBorrowable(user, assetId);
+
+        return (maxBorrow * 1e18) / userDebt;
+    }
+
+    function isLiquidatable(
+        address user,
+        uint256 assetId
+    ) external view returns (bool) {
+        return healthFactor(user, assetId) < LIQUIDATION_THRESHOLD;
+    }
+
+    function _collateralValue(
+        address user,
+        uint256 assetId
+    ) internal view returns (uint256) {
+        uint256 nav = _getFreshNAV(assetId);
+        uint256 shares = collateral[user][assetId];
+
+        return (shares * nav) / 1e18;
+    }
+
+    function _maxBorrowable(
+        address user,
+        uint256 assetId
+    ) internal view returns (uint256) {
+        (bool approved, uint16 underwritingLtv,,,) =
+            registry.getTerms(user, assetId);
+
+        require(approved, "Not approved");
+
+        uint256 effectiveLTV =
+            _effectiveLTV(assetId, underwritingLtv);
+
+        uint256 value = _collateralValue(user, assetId);
+
+        return (value * effectiveLTV) / 10_000;
+    }
+
+    function _effectiveLTV(
+        uint256 assetId,
+        uint16 underwritingLtv
+    ) internal view returns (uint256) {
+        uint256 healthCap = _assetHealthCap(assetId);
+
+        return underwritingLtv < healthCap
+            ? underwritingLtv
+            : healthCap;
+    }
+
+    function _assetHealthCap(
+        uint256 assetId
+    ) internal view returns (uint256) {
+        address logic = assetIdToLogic[assetId];
+
+        if (logic == address(0)) return 10_000;
+
+        try ICashFlowLogic(logic).getCashflowHealth()
+            returns (CashflowHealth health)
+        {
+            if (health == CashflowHealth.PERFORMING) return 10_000;
+            if (health == CashflowHealth.GRACE_PERIOD) return 8_000;
+            if (health == CashflowHealth.LATE) return 5_000;
+            if (health == CashflowHealth.DEFAULTED) return 0;
+            return 10_000;
+        } catch {
+            return 10_000;
+        }
+    }
+
+    function _getFreshNAV(uint256 assetId)
+        internal
         view
         returns (uint256)
     {
-        Loan memory loan = loans[borrower][assetId];
+        require(navOracle.isFresh(assetId), "Stale NAV");
 
-        if (loan.principal == 0) return 0;
+        (uint256 nav,,) = navOracle.getNAVData(assetId);
+        require(nav > 0, "No NAV");
 
-        uint256 elapsed = block.timestamp - loan.lastAccrual;
-        uint256 interest =
-            (loan.principal * loan.rateBps * elapsed)
-            / (365 days * 10_000);
-
-        return loan.principal + interest;
+        return nav;
     }
 
-    // ------------------------------------------------------------
-    // Internal
-    // ------------------------------------------------------------
+    // ============================================================
+    // Admin
+    // ============================================================
 
-    function _accrueInterest(Loan storage loan) internal {
-        if (loan.principal == 0) return;
+    function setAssetToken(
+        uint256 assetId,
+        address token
+    ) external onlyOwner {
+        require(token != address(0), "Invalid token");
+        assetIdToToken[assetId] = token;
 
-        uint256 elapsed = block.timestamp - loan.lastAccrual;
-        if (elapsed == 0) return;
-
-        uint256 interest =
-            (loan.principal * loan.rateBps * elapsed)
-            / (365 days * 10_000);
-
-        loan.principal += interest;
+        emit AssetTokenSet(assetId, token);
     }
 
-    function _getUnderwriting(uint256 assetId)
-        internal
-        view
-        returns (bool, uint16, uint16, uint256)
-    {
-        (
-            bool approved,
-            uint16 maxLtvBps,
-            uint16 rateBps,
-            uint256 expiry,
-            /*bytes32 reasoningHash*/
-        ) = underwriting.getTerms(msg.sender, assetId);
+    function setAssetLogic(
+        uint256 assetId,
+        address logic
+    ) external onlyOwner {
+        require(logic != address(0), "Invalid logic");
+        assetIdToLogic[assetId] = logic;
 
-        return (approved, maxLtvBps, rateBps, expiry);
+        emit AssetLogicSet(assetId, logic);
     }
 
-    function _getAssetValue(uint256 assetId)
-        internal
-        view
-        returns (uint256 assetValue)
-    {
-        // Store all values in a temporary variable to avoid stack too deep
-        (
-            uint256 val1,
-            uint8 val2,
-            address val3,
-            address val4,
-            address val5,
-            address val6,
-            bool val7,
-            bool val8,
-            uint256 _assetValue,
-            uint256 val10,
-            uint256 val11,
-            uint256 val12,
-            uint256 val13,
-            uint256 val14,
-            uint256 val15,
-            uint256 val16,
-            uint256 val17,
-            uint256 val18,
-            address val19,
-            uint8 val20,
-            uint8 val21,
-            uint256 val22,
-            uint256 val23,
-            string memory val24
-        ) = registry.assets(assetId);
-        
-        assetValue = _assetValue;
+    function setLiquidationBonus(
+        uint256 newBonus
+    ) external onlyOwner {
+        require(newBonus >= 10_000, "Must be >=100%");
+
+        uint256 old = liquidationBonusBps;
+        liquidationBonusBps = newBonus;
+
+        emit LiquidationBonusUpdated(old, newBonus);
     }
 }
