@@ -546,7 +546,7 @@ contract RWALendingPoolTest is Test {
     // ------------------------------------------------------------
 
     function testWithdrawRevertsIfUnhealthy() public {
-        navOracle.setNAV(1, 1000 ether);
+        navOracle.setNAV(1, 1 ether); // Small NAV for tight math
         navOracle.setIsFresh(1, true);
 
         underwriting.setTerms(
@@ -559,12 +559,17 @@ contract RWALendingPoolTest is Test {
         vm.prank(borrower);
         pool.depositCollateral(1, 1000 ether);
 
-        vm.prank(borrower);
-        pool.borrow(1, 500 ether);
+        // Collateral value = 1000
+        // Max borrow = 500
 
-        // Try to withdraw collateral when position is leveraged (would become unhealthy)
+        vm.prank(borrower);
+        pool.borrow(1, 500 ether); // Exactly max
+
+        // Now health factor = 1.0
+
         vm.expectRevert("Would become unhealthy");
         vm.prank(borrower);
-        pool.withdrawCollateral(1, 100 ether);
+        pool.withdrawCollateral(1, 1 ether); // Should revert
     }
+
 }
