@@ -174,7 +174,9 @@ contract RWALendingPoolTest is Test {
         pool.repay(1, 200 ether);
 
         // Check that the debt was reduced
-        assertEq(pool.debt(borrower, 1), 300 ether);
+        (uint256 principal,) = pool.debt(borrower, 1);
+        assertEq(principal, 300 ether);
+
     }
 
     // ------------------------------------------------------------
@@ -212,7 +214,9 @@ contract RWALendingPoolTest is Test {
         pool.liquidate(borrower, 1, 500 ether); // repay full debt
         vm.stopPrank();
 
-        assertEq(pool.debt(borrower, 1), 0);
+        // Debt should be > zero
+        (uint256 principal,) = pool.debt(borrower, 1);
+        assertGt(principal, 0); // bad debt remains
         assertEq(pool.collateral(borrower, 1), 0);
 
         assertGt(collateralToken.balanceOf(liquidator), 0);
@@ -246,7 +250,8 @@ contract RWALendingPoolTest is Test {
         pool.liquidate(borrower, 1, 200 ether);
         vm.stopPrank();
 
-        assertEq(pool.debt(borrower, 1), 300 ether);
+        (uint256 principal,) = pool.debt(borrower, 1);
+        assertEq(principal, 300 ether);
         // After partial liquidation, some collateral should remain
         assertGt(pool.collateral(borrower, 1), 0);
     }
@@ -571,5 +576,173 @@ contract RWALendingPoolTest is Test {
         vm.prank(borrower);
         pool.withdrawCollateral(1, 1 ether); // Should revert
     }
+
+    function testInterestMakesPositionLiquidatable() public {
+        navOracle.setNAV(1, 1 ether);
+        navOracle.setIsFresh(1, true);
+
+        underwriting.setTerms(
+            true,
+            8000, // 80%
+            1000, // 10% APR
+            block.timestamp + 365 days
+        );
+
+        vm.prank(borrower);
+        pool.depositCollateral(1, 1000 ether);
+
+        vm.prank(borrower);
+        pool.borrow(1, 800 ether); // max
+
+        vm.warp(block.timestamp + 365 days);
+
+        assertTrue(pool.isLiquidatable(borrower, 1));
+    }
+
+    // --------------------------------------------------------
+    function testFullLiquidationWithProtocolFee() public {
+        navOracle.setNAV(1, 1000 ether);
+        navOracle.setIsFresh(1, true);
+
+        underwriting.setTerms(
+            true,
+            5000,
+            0,
+            block.timestamp + 1 days
+        );
+
+        pool.setProtocolLiquidationFee(200); // 2%
+
+        // Borrower deposits collateral
+        vm.prank(borrower);
+        pool.depositCollateral(1, 1000 ether);
+
+        vm.prank(borrower);
+        pool.borrow(1, 500_000 ether);
+
+        // Crash NAV hard
+        navOracle.setNAV(1, 1 ether);
+
+        address liquidator = address(0xCAFE);
+        stable.mint(liquidator, 500 ether);
+
+        vm.startPrank(liquidator);
+        stable.approve(address(pool), type(uint256).max);
+
+        pool.liquidate(borrower, 1, 500 ether);
+        vm.stopPrank();
+
+        // Debt should be > zero
+        (uint256 principal,) = pool.debt(borrower, 1);
+        assertGt(principal, 0); // bad debt remains
+
+
+        assertLt(pool.collateral(borrower, 1), 1000 ether);
+        assertGt(pool.collateral(borrower, 1), 0);
+
+
+        // Protocol should receive shares
+        assertGt(collateralToken.balanceOf(pool.treasury()), 0);
+
+        // Liquidator should receive shares
+        assertGt(collateralToken.balanceOf(liquidator), 0);
+    }
+
+    function testExactLiquidationMath() public {
+        navOracle.setNAV(1, 1000 ether);
+        navOracle.setIsFresh(1, true);
+
+        underwriting.setTerms(
+            true,
+            5000,
+            0,
+            block.timestamp + 1 days
+        );
+
+        pool.setProtocolLiquidationFee(200); // 2%
+        pool.setLiquidationBonus(10500);     // 5%
+
+        vm.prank(borrower);
+        pool.depositCollateral(1, 1000 ether);
+
+        vm.prank(borrower);
+        pool.borrow(1, 500_000 ether);
+
+        navOracle.setNAV(1, 1 ether);
+
+        address liquidator = address(0xCAFE);
+        stable.mint(liquidator, 500 ether);
+
+        vm.startPrank(liquidator);
+        stable.approve(address(pool), type(uint256).max);
+
+        pool.liquidate(borrower, 1, 500 ether);
+        vm.stopPrank();
+
+        uint256 liquidatorShares = collateralToken.balanceOf(liquidator);
+        uint256 protocolShares = collateralToken.balanceOf(pool.treasury());
+
+        // Expected USD:
+        // Liquidator: 500 * 1.05 = 525
+        // Protocol: 500 * 0.02 = 10
+        // Total USD seized = 535
+        // NAV = 1 => 1 USD = 1 share
+
+        assertEq(liquidatorShares, 525 ether);
+        assertEq(protocolShares, 10 ether);
+    }
+
+    function testPartialLiquidationWithProtocolFee() public {
+        navOracle.setNAV(1, 1000 ether);
+        navOracle.setIsFresh(1, true);
+
+        underwriting.setTerms(
+            true,
+            5000,
+            0,
+            block.timestamp + 1 days
+        );
+
+        pool.setProtocolLiquidationFee(200);
+
+        vm.prank(borrower);
+        pool.depositCollateral(1, 1000 ether);
+
+        vm.prank(borrower);
+        pool.borrow(1, 500_000 ether);
+
+
+        navOracle.setNAV(1, 1 ether);
+
+        address liquidator = address(0xCAFE);
+        stable.mint(liquidator, 200 ether);
+
+        vm.startPrank(liquidator);
+        stable.approve(address(pool), type(uint256).max);
+
+        pool.liquidate(borrower, 1, 200 ether);
+        vm.stopPrank();
+
+        // Liquidator USD = 200 * 1.05 = 210
+        // Protocol USD = 200 * 0.02 = 4
+        // Total = 214 shares (NAV=1)
+
+        assertEq(collateralToken.balanceOf(liquidator), 210 ether);
+        assertEq(collateralToken.balanceOf(pool.treasury()), 4 ether);
+
+        // Debt should now be 300
+        (uint256 principal,) = pool.debt(borrower, 1);
+        assertLt(principal, 500_000 ether);
+        assertGt(principal, 0);
+
+    }
+
+    function testProtocolFeeCap() public {
+        vm.prank(pool.owner());
+        vm.expectRevert("Fee too high");
+        pool.setProtocolLiquidationFee(5000); // 50%
+    }
+
+
 
 }

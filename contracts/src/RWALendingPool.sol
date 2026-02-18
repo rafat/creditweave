@@ -27,7 +27,7 @@ contract RWALendingPool is ReentrancyGuard, Ownable {
     mapping(address => mapping(uint256 => uint256)) public collateral;
 
     // user => assetId => debt in stablecoin units
-    mapping(address => mapping(uint256 => uint256)) public debt;
+    mapping(address => mapping(uint256 => DebtPosition)) public debt;
 
     // assetId => share token address
     mapping(uint256 => address) public assetIdToToken;
@@ -40,6 +40,17 @@ contract RWALendingPool is ReentrancyGuard, Ownable {
 
     // health factor < 0.95e18 → liquidatable
     uint256 public constant LIQUIDATION_THRESHOLD = 0.95e18;
+
+    uint256 public constant YEAR = 365 days;
+
+    struct DebtPosition {
+        uint256 principal;
+        uint256 lastAccrued;
+    }
+
+    uint256 public protocolLiquidationFeeBps = 200; // 2%
+    address public treasury;
+
 
     // ------------------------------------------------------------
     // Events
@@ -76,6 +87,7 @@ contract RWALendingPool is ReentrancyGuard, Ownable {
         stablecoin = IERC20(_stable);
         registry = UnderwritingRegistry(_registry);
         navOracle = NAVOracle(_navOracle);
+        treasury = msg.sender;
     }
 
     // ============================================================
@@ -129,16 +141,26 @@ contract RWALendingPool is ReentrancyGuard, Ownable {
         require(amount > 0, "Invalid borrow");
         require(registry.isApproved(msg.sender, assetId), "Not approved");
 
+        _accrue(msg.sender, assetId);
+
         uint256 maxBorrow = _maxBorrowable(msg.sender, assetId);
 
+        DebtPosition storage position = debt[msg.sender][assetId];
+
         require(
-            debt[msg.sender][assetId] + amount <= maxBorrow,
+            position.principal + amount <= maxBorrow,
             "Exceeds LTV"
         );
 
-        debt[msg.sender][assetId] += amount;
+        
+        position.principal += amount;
 
         stablecoin.transfer(msg.sender, amount);
+
+        if (position.lastAccrued == 0) {
+            position.lastAccrued = block.timestamp;
+        }
+
 
         emit Borrowed(msg.sender, assetId, amount);
     }
@@ -149,15 +171,20 @@ contract RWALendingPool is ReentrancyGuard, Ownable {
     ) external nonReentrant {
         require(amount > 0, "Invalid repay");
 
-        uint256 userDebt = debt[msg.sender][assetId];
+        _accrue(msg.sender, assetId);
+
+        DebtPosition storage position = debt[msg.sender][assetId];
+
+        uint256 userDebt = position.principal;
         require(userDebt > 0, "No debt");
 
         stablecoin.transferFrom(msg.sender, address(this), amount);
 
         if (amount >= userDebt) {
-            debt[msg.sender][assetId] = 0;
+            position.principal = 0;
+            position.lastAccrued = block.timestamp;
         } else {
-            debt[msg.sender][assetId] = userDebt - amount;
+            position.principal -= amount;
         }
 
         emit Repaid(msg.sender, assetId, amount);
@@ -172,46 +199,84 @@ contract RWALendingPool is ReentrancyGuard, Ownable {
         uint256 assetId,
         uint256 repayAmount
     ) external nonReentrant {
+
+        _accrue(user, assetId);
+
         require(
             healthFactor(user, assetId) < LIQUIDATION_THRESHOLD,
             "Healthy position"
         );
 
-        uint256 userDebt = debt[user][assetId];
+        DebtPosition storage position = debt[user][assetId];
+
+        uint256 userDebt = position.principal;
         require(userDebt > 0, "No debt");
+
+        uint256 nav = _getFreshNAV(assetId);
+
+        uint256 maxUsdRecoverable =
+            (collateral[user][assetId] * nav) / 1e18;
+
+        uint256 maxRepayPossible =
+            (maxUsdRecoverable * 10_000) / liquidationBonusBps;
+
+        if (repayAmount > maxRepayPossible) {
+            repayAmount = maxRepayPossible;
+        }
 
         if (repayAmount > userDebt) {
             repayAmount = userDebt;
         }
 
+
         // Liquidator repays debt
         stablecoin.transferFrom(msg.sender, address(this), repayAmount);
 
-        debt[user][assetId] -= repayAmount;
+        position.principal -= repayAmount;
 
-        // Calculate collateral equivalent in shares
-        uint256 nav = _getFreshNAV(assetId);
+        if (position.principal == 0) {
+            position.lastAccrued = block.timestamp;
+        }
 
-        // USD value with bonus
-        uint256 usdWithBonus =
+        uint256 liquidatorUSD =
             (repayAmount * liquidationBonusBps) / 10_000;
 
-        // Convert USD → shares
-        uint256 sharesToSeize =
-            (usdWithBonus * 1e18) / nav;
+        uint256 protocolUSD =
+            (repayAmount * protocolLiquidationFeeBps) / 10_000;
+
+        uint256 totalUSDSeized = liquidatorUSD + protocolUSD;
+
+        uint256 totalShares =
+            (totalUSDSeized * 1e18) / nav;
+
 
         uint256 userCollateral = collateral[user][assetId];
 
-        if (sharesToSeize > userCollateral) {
-            sharesToSeize = userCollateral;
+        if (totalShares > userCollateral) {
+            totalShares = userCollateral;
         }
 
-        collateral[user][assetId] -= sharesToSeize;
+        uint256 liquidatorShares =
+            (liquidatorUSD * 1e18) / nav;
+
+        uint256 protocolShares =
+            (protocolUSD * 1e18) / nav;
+
+        if (liquidatorShares + protocolShares > totalShares) {
+            // adjust in case of rounding
+            liquidatorShares = (liquidatorShares * totalShares) /
+                (liquidatorShares + protocolShares);
+            protocolShares = totalShares - liquidatorShares;
+        }
+
+
+        collateral[user][assetId] -= totalShares;
 
         address token = assetIdToToken[assetId];
-        IERC20(token).transfer(msg.sender, sharesToSeize);
+        IERC20(token).transfer(msg.sender, liquidatorShares);
+        IERC20(token).transfer(treasury, protocolShares);
 
-        emit Liquidated(user, assetId, repayAmount, sharesToSeize);
+        emit Liquidated(user, assetId, repayAmount, totalShares);
     }
 
     // ============================================================
@@ -222,13 +287,15 @@ contract RWALendingPool is ReentrancyGuard, Ownable {
         address user,
         uint256 assetId
     ) public view returns (uint256) {
-        uint256 userDebt = debt[user][assetId];
-        if (userDebt == 0) return type(uint256).max;
+
+        uint256 currentDebt = _debtWithAccrual(user, assetId);
+        if (currentDebt == 0) return type(uint256).max;
 
         uint256 maxBorrow = _maxBorrowable(user, assetId);
 
-        return (maxBorrow * 1e18) / userDebt;
+        return (maxBorrow * 1e18) / currentDebt;
     }
+
 
     function isLiquidatable(
         address user,
@@ -251,10 +318,13 @@ contract RWALendingPool is ReentrancyGuard, Ownable {
         address user,
         uint256 assetId
     ) internal view returns (uint256) {
-        (bool approved, uint16 underwritingLtv,,,) =
+        (, uint16 underwritingLtv,,,) =
             registry.getTerms(user, assetId);
 
-        require(approved, "Not approved");
+        if (!registry.isApproved(user, assetId)) {
+            return 0;
+        }
+
 
         uint256 effectiveLTV =
             _effectiveLTV(assetId, underwritingLtv);
@@ -308,6 +378,46 @@ contract RWALendingPool is ReentrancyGuard, Ownable {
         return nav;
     }
 
+    function _accrue(address user, uint256 assetId) internal {
+        DebtPosition storage position = debt[user][assetId];
+
+        if (position.principal == 0) {
+            position.lastAccrued = block.timestamp;
+            return;
+        }
+
+        ( , , uint16 rateBps, , ) = registry.getTerms(user, assetId);
+
+        uint256 timeElapsed = block.timestamp - position.lastAccrued;
+        if (timeElapsed == 0) return;
+
+        uint256 interest =
+            (position.principal * rateBps * timeElapsed)
+            / (10_000 * YEAR);
+
+        position.principal += interest;
+        position.lastAccrued = block.timestamp;
+    }
+
+    function _debtWithAccrual(address user, uint256 assetId)
+        internal view returns (uint256)
+    {
+        DebtPosition memory position = debt[user][assetId];
+        if (position.principal == 0) return 0;
+
+        ( , , uint16 rateBps, , ) = registry.getTerms(user, assetId);
+
+        uint256 timeElapsed = block.timestamp - position.lastAccrued;
+
+        uint256 interest =
+            (position.principal * rateBps * timeElapsed)
+            / (10_000 * YEAR);
+
+        return position.principal + interest;
+    }
+
+
+
     // ============================================================
     // Admin
     // ============================================================
@@ -342,4 +452,19 @@ contract RWALendingPool is ReentrancyGuard, Ownable {
 
         emit LiquidationBonusUpdated(old, newBonus);
     }
+
+    function setProtocolLiquidationFee(uint256 newFeeBps)
+        external
+        onlyOwner
+    {
+        require(newFeeBps <= 2000, "Fee too high"); // cap at 20%
+        protocolLiquidationFeeBps = newFeeBps;
+    }
+
+    function setTreasury(address _treasury) external onlyOwner {
+        require(treasury != address(0), "No treasury");
+
+        treasury = _treasury;
+    }
+
 }
