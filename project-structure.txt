@@ -1,0 +1,651 @@
+.
+├── contracts
+│   ├── broadcast
+│   │   └── DeployAll.s.sol
+│   │       └── 11155111
+│   │           ├── run-1771498597303.json
+│   │           └── run-latest.json
+│   ├── cache
+│   │   ├── DeployAll.s.sol
+│   │   │   └── 11155111
+│   │   │       ├── run-1771498597303.json
+│   │   │       └── run-latest.json
+│   │   ├── solidity-files-cache.json
+│   │   └── test-failures
+│   ├── deployments.txt
+│   ├── foundry.lock
+│   ├── foundry.toml
+│   ├── lib
+│   │   ├── forge-std
+│   │   │   ├── CONTRIBUTING.md
+│   │   │   ├── foundry.toml
+│   │   │   ├── LICENSE-APACHE
+│   │   │   ├── LICENSE-MIT
+│   │   │   ├── package.json
+│   │   │   ├── README.md
+│   │   │   ├── RELEASE_CHECKLIST.md
+│   │   │   ├── scripts
+│   │   │   │   └── vm.py
+│   │   │   ├── src
+│   │   │   │   ├── Base.sol
+│   │   │   │   ├── Config.sol
+│   │   │   │   ├── console.sol
+│   │   │   │   ├── console2.sol
+│   │   │   │   ├── interfaces
+│   │   │   │   │   ├── IERC1155.sol
+│   │   │   │   │   ├── IERC165.sol
+│   │   │   │   │   ├── IERC20.sol
+│   │   │   │   │   ├── IERC4626.sol
+│   │   │   │   │   ├── IERC6909.sol
+│   │   │   │   │   ├── IERC721.sol
+│   │   │   │   │   ├── IERC7540.sol
+│   │   │   │   │   ├── IERC7575.sol
+│   │   │   │   │   └── IMulticall3.sol
+│   │   │   │   ├── LibVariable.sol
+│   │   │   │   ├── safeconsole.sol
+│   │   │   │   ├── Script.sol
+│   │   │   │   ├── StdAssertions.sol
+│   │   │   │   ├── StdChains.sol
+│   │   │   │   ├── StdCheats.sol
+│   │   │   │   ├── StdConfig.sol
+│   │   │   │   ├── StdConstants.sol
+│   │   │   │   ├── StdError.sol
+│   │   │   │   ├── StdInvariant.sol
+│   │   │   │   ├── StdJson.sol
+│   │   │   │   ├── StdMath.sol
+│   │   │   │   ├── StdStorage.sol
+│   │   │   │   ├── StdStyle.sol
+│   │   │   │   ├── StdToml.sol
+│   │   │   │   ├── StdUtils.sol
+│   │   │   │   ├── Test.sol
+│   │   │   │   └── Vm.sol
+│   │   │   └── test
+│   │   │       ├── CommonBase.t.sol
+│   │   │       ├── compilation
+│   │   │       │   ├── CompilationScript.sol
+│   │   │       │   ├── CompilationScriptBase.sol
+│   │   │       │   ├── CompilationTest.sol
+│   │   │       │   └── CompilationTestBase.sol
+│   │   │       ├── Config.t.sol
+│   │   │       ├── fixtures
+│   │   │       │   ├── broadcast.log.json
+│   │   │       │   ├── config.toml
+│   │   │       │   ├── test.json
+│   │   │       │   └── test.toml
+│   │   │       ├── LibVariable.t.sol
+│   │   │       ├── StdAssertions.t.sol
+│   │   │       ├── StdChains.t.sol
+│   │   │       ├── StdCheats.t.sol
+│   │   │       ├── StdConstants.t.sol
+│   │   │       ├── StdError.t.sol
+│   │   │       ├── StdJson.t.sol
+│   │   │       ├── StdMath.t.sol
+│   │   │       ├── StdStorage.t.sol
+│   │   │       ├── StdStyle.t.sol
+│   │   │       ├── StdToml.t.sol
+│   │   │       ├── StdUtils.t.sol
+│   │   │       └── Vm.t.sol
+│   │   └── openzeppelin-contracts
+│   │       ├── audits
+│   │       │   ├── 2017-03.md
+│   │       │   ├── 2018-10.pdf
+│   │       │   ├── 2022-10-Checkpoints.pdf
+│   │       │   ├── 2022-10-ERC4626.pdf
+│   │       │   ├── 2023-05-v4.9.pdf
+│   │       │   ├── 2023-10-v5.0.pdf
+│   │       │   ├── 2024-10-v5.1.pdf
+│   │       │   ├── 2024-12-v5.2.pdf
+│   │       │   ├── 2025-04-v5.3.pdf
+│   │       │   ├── 2025-07-v5.4.pdf
+│   │       │   └── README.md
+│   │       ├── certora
+│   │       │   ├── diff
+│   │       │   │   ├── access_manager_AccessManager.sol.patch
+│   │       │   │   ├── account_extensions_draft-AccountERC7579.sol.patch
+│   │       │   │   └── token_ERC721_ERC721.sol.patch
+│   │       │   ├── harnesses
+│   │       │   │   ├── AccessControlDefaultAdminRulesHarness.sol
+│   │       │   │   ├── AccessControlHarness.sol
+│   │       │   │   ├── AccessManagedHarness.sol
+│   │       │   │   ├── AccessManagerHarness.sol
+│   │       │   │   ├── AccountHarness.sol
+│   │       │   │   ├── DoubleEndedQueueHarness.sol
+│   │       │   │   ├── EnumerableMapHarness.sol
+│   │       │   │   ├── EnumerableSetHarness.sol
+│   │       │   │   ├── ERC20FlashMintHarness.sol
+│   │       │   │   ├── ERC20PermitHarness.sol
+│   │       │   │   ├── ERC20WrapperHarness.sol
+│   │       │   │   ├── ERC3156FlashBorrowerHarness.sol
+│   │       │   │   ├── ERC721Harness.sol
+│   │       │   │   ├── ERC721ReceiverHarness.sol
+│   │       │   │   ├── InitializableHarness.sol
+│   │       │   │   ├── NoncesHarness.sol
+│   │       │   │   ├── Ownable2StepHarness.sol
+│   │       │   │   ├── OwnableHarness.sol
+│   │       │   │   ├── PausableHarness.sol
+│   │       │   │   └── TimelockControllerHarness.sol
+│   │       │   ├── Makefile
+│   │       │   ├── README.md
+│   │       │   ├── reports
+│   │       │   │   ├── 2021-10.pdf
+│   │       │   │   ├── 2022-03.pdf
+│   │       │   │   └── 2022-05.pdf
+│   │       │   ├── run.js
+│   │       │   └── specs
+│   │       │       ├── AccessControl.conf
+│   │       │       ├── AccessControl.spec
+│   │       │       ├── AccessControlDefaultAdminRules.conf
+│   │       │       ├── AccessControlDefaultAdminRules.spec
+│   │       │       ├── AccessManaged.conf
+│   │       │       ├── AccessManaged.spec
+│   │       │       ├── AccessManager.conf
+│   │       │       ├── AccessManager.spec
+│   │       │       ├── Account.conf
+│   │       │       ├── Account.spec
+│   │       │       ├── DoubleEndedQueue.conf
+│   │       │       ├── DoubleEndedQueue.spec
+│   │       │       ├── EnumerableMap.conf
+│   │       │       ├── EnumerableMap.spec
+│   │       │       ├── EnumerableSet.conf
+│   │       │       ├── EnumerableSet.spec
+│   │       │       ├── ERC20.conf
+│   │       │       ├── ERC20.spec
+│   │       │       ├── ERC20FlashMint.conf
+│   │       │       ├── ERC20FlashMint.spec
+│   │       │       ├── ERC20Wrapper.conf
+│   │       │       ├── ERC20Wrapper.spec
+│   │       │       ├── ERC721.conf
+│   │       │       ├── ERC721.spec
+│   │       │       ├── helpers
+│   │       │       ├── Initializable.conf
+│   │       │       ├── Initializable.spec
+│   │       │       ├── methods
+│   │       │       ├── Nonces.conf
+│   │       │       ├── Nonces.spec
+│   │       │       ├── Ownable.conf
+│   │       │       ├── Ownable.spec
+│   │       │       ├── Ownable2Step.conf
+│   │       │       ├── Ownable2Step.spec
+│   │       │       ├── Pausable.conf
+│   │       │       ├── Pausable.spec
+│   │       │       ├── TimelockController.conf
+│   │       │       └── TimelockController.spec
+│   │       ├── CHANGELOG.md
+│   │       ├── CODE_OF_CONDUCT.md
+│   │       ├── contracts
+│   │       │   ├── access
+│   │       │   │   ├── AccessControl.sol
+│   │       │   │   ├── extensions
+│   │       │   │   ├── IAccessControl.sol
+│   │       │   │   ├── manager
+│   │       │   │   ├── Ownable.sol
+│   │       │   │   ├── Ownable2Step.sol
+│   │       │   │   └── README.adoc
+│   │       │   ├── account
+│   │       │   │   ├── Account.sol
+│   │       │   │   ├── extensions
+│   │       │   │   ├── README.adoc
+│   │       │   │   └── utils
+│   │       │   ├── crosschain
+│   │       │   │   ├── ERC7786Recipient.sol
+│   │       │   │   └── README.adoc
+│   │       │   ├── finance
+│   │       │   │   ├── README.adoc
+│   │       │   │   ├── VestingWallet.sol
+│   │       │   │   └── VestingWalletCliff.sol
+│   │       │   ├── governance
+│   │       │   │   ├── extensions
+│   │       │   │   ├── Governor.sol
+│   │       │   │   ├── IGovernor.sol
+│   │       │   │   ├── README.adoc
+│   │       │   │   ├── TimelockController.sol
+│   │       │   │   └── utils
+│   │       │   ├── interfaces
+│   │       │   │   ├── draft-IERC1822.sol
+│   │       │   │   ├── draft-IERC4337.sol
+│   │       │   │   ├── draft-IERC6093.sol
+│   │       │   │   ├── draft-IERC7579.sol
+│   │       │   │   ├── draft-IERC7674.sol
+│   │       │   │   ├── draft-IERC7786.sol
+│   │       │   │   ├── draft-IERC7802.sol
+│   │       │   │   ├── draft-IERC7821.sol
+│   │       │   │   ├── IERC1155.sol
+│   │       │   │   ├── IERC1155MetadataURI.sol
+│   │       │   │   ├── IERC1155Receiver.sol
+│   │       │   │   ├── IERC1271.sol
+│   │       │   │   ├── IERC1363.sol
+│   │       │   │   ├── IERC1363Receiver.sol
+│   │       │   │   ├── IERC1363Spender.sol
+│   │       │   │   ├── IERC165.sol
+│   │       │   │   ├── IERC1820Implementer.sol
+│   │       │   │   ├── IERC1820Registry.sol
+│   │       │   │   ├── IERC1967.sol
+│   │       │   │   ├── IERC20.sol
+│   │       │   │   ├── IERC20Metadata.sol
+│   │       │   │   ├── IERC2309.sol
+│   │       │   │   ├── IERC2612.sol
+│   │       │   │   ├── IERC2981.sol
+│   │       │   │   ├── IERC3156.sol
+│   │       │   │   ├── IERC3156FlashBorrower.sol
+│   │       │   │   ├── IERC3156FlashLender.sol
+│   │       │   │   ├── IERC4626.sol
+│   │       │   │   ├── IERC4906.sol
+│   │       │   │   ├── IERC5267.sol
+│   │       │   │   ├── IERC5313.sol
+│   │       │   │   ├── IERC5805.sol
+│   │       │   │   ├── IERC6372.sol
+│   │       │   │   ├── IERC6909.sol
+│   │       │   │   ├── IERC721.sol
+│   │       │   │   ├── IERC721Enumerable.sol
+│   │       │   │   ├── IERC721Metadata.sol
+│   │       │   │   ├── IERC721Receiver.sol
+│   │       │   │   ├── IERC7751.sol
+│   │       │   │   ├── IERC777.sol
+│   │       │   │   ├── IERC777Recipient.sol
+│   │       │   │   ├── IERC777Sender.sol
+│   │       │   │   ├── IERC7913.sol
+│   │       │   │   └── README.adoc
+│   │       │   ├── metatx
+│   │       │   │   ├── ERC2771Context.sol
+│   │       │   │   ├── ERC2771Forwarder.sol
+│   │       │   │   └── README.adoc
+│   │       │   ├── mocks
+│   │       │   │   ├── AccessManagedTarget.sol
+│   │       │   │   ├── AccessManagerMock.sol
+│   │       │   │   ├── account
+│   │       │   │   ├── ArraysMock.sol
+│   │       │   │   ├── AuthorityMock.sol
+│   │       │   │   ├── Base64Dirty.sol
+│   │       │   │   ├── BatchCaller.sol
+│   │       │   │   ├── CallReceiverMock.sol
+│   │       │   │   ├── compound
+│   │       │   │   ├── ConstructorMock.sol
+│   │       │   │   ├── ContextMock.sol
+│   │       │   │   ├── crosschain
+│   │       │   │   ├── docs
+│   │       │   │   ├── DummyImplementation.sol
+│   │       │   │   ├── EIP712Verifier.sol
+│   │       │   │   ├── ERC1271WalletMock.sol
+│   │       │   │   ├── ERC165Mock.sol
+│   │       │   │   ├── ERC2771ContextMock.sol
+│   │       │   │   ├── ERC3156FlashBorrowerMock.sol
+│   │       │   │   ├── EtherReceiverMock.sol
+│   │       │   │   ├── governance
+│   │       │   │   ├── InitializableMock.sol
+│   │       │   │   ├── MerkleProofCustomHashMock.sol
+│   │       │   │   ├── MerkleTreeMock.sol
+│   │       │   │   ├── MulticallHelper.sol
+│   │       │   │   ├── MultipleInheritanceInitializableMocks.sol
+│   │       │   │   ├── PausableMock.sol
+│   │       │   │   ├── proxy
+│   │       │   │   ├── ReentrancyAttack.sol
+│   │       │   │   ├── ReentrancyMock.sol
+│   │       │   │   ├── ReentrancyTransientMock.sol
+│   │       │   │   ├── RegressionImplementation.sol
+│   │       │   │   ├── SingleInheritanceInitializableMocks.sol
+│   │       │   │   ├── Stateless.sol
+│   │       │   │   ├── StorageSlotMock.sol
+│   │       │   │   ├── TimelockReentrant.sol
+│   │       │   │   ├── token
+│   │       │   │   ├── TransientSlotMock.sol
+│   │       │   │   ├── UpgradeableBeaconMock.sol
+│   │       │   │   ├── utils
+│   │       │   │   ├── VotesExtendedMock.sol
+│   │       │   │   └── VotesMock.sol
+│   │       │   ├── package.json
+│   │       │   ├── proxy
+│   │       │   │   ├── beacon
+│   │       │   │   ├── Clones.sol
+│   │       │   │   ├── ERC1967
+│   │       │   │   ├── Proxy.sol
+│   │       │   │   ├── README.adoc
+│   │       │   │   ├── transparent
+│   │       │   │   └── utils
+│   │       │   ├── token
+│   │       │   │   ├── common
+│   │       │   │   ├── ERC1155
+│   │       │   │   ├── ERC20
+│   │       │   │   ├── ERC6909
+│   │       │   │   └── ERC721
+│   │       │   ├── utils
+│   │       │   │   ├── Address.sol
+│   │       │   │   ├── Arrays.sol
+│   │       │   │   ├── Base58.sol
+│   │       │   │   ├── Base64.sol
+│   │       │   │   ├── Blockhash.sol
+│   │       │   │   ├── Bytes.sol
+│   │       │   │   ├── CAIP10.sol
+│   │       │   │   ├── CAIP2.sol
+│   │       │   │   ├── Calldata.sol
+│   │       │   │   ├── Comparators.sol
+│   │       │   │   ├── Context.sol
+│   │       │   │   ├── Create2.sol
+│   │       │   │   ├── cryptography
+│   │       │   │   ├── draft-InteroperableAddress.sol
+│   │       │   │   ├── Errors.sol
+│   │       │   │   ├── introspection
+│   │       │   │   ├── LowLevelCall.sol
+│   │       │   │   ├── math
+│   │       │   │   ├── Memory.sol
+│   │       │   │   ├── Multicall.sol
+│   │       │   │   ├── Nonces.sol
+│   │       │   │   ├── NoncesKeyed.sol
+│   │       │   │   ├── Packing.sol
+│   │       │   │   ├── Panic.sol
+│   │       │   │   ├── Pausable.sol
+│   │       │   │   ├── README.adoc
+│   │       │   │   ├── ReentrancyGuard.sol
+│   │       │   │   ├── ReentrancyGuardTransient.sol
+│   │       │   │   ├── RelayedCall.sol
+│   │       │   │   ├── RLP.sol
+│   │       │   │   ├── ShortStrings.sol
+│   │       │   │   ├── SlotDerivation.sol
+│   │       │   │   ├── StorageSlot.sol
+│   │       │   │   ├── Strings.sol
+│   │       │   │   ├── structs
+│   │       │   │   ├── TransientSlot.sol
+│   │       │   │   └── types
+│   │       │   └── vendor
+│   │       │       └── compound
+│   │       ├── CONTRIBUTING.md
+│   │       ├── docs
+│   │       │   ├── antora.yml
+│   │       │   ├── config.js
+│   │       │   ├── modules
+│   │       │   │   └── ROOT
+│   │       │   ├── README.md
+│   │       │   └── templates
+│   │       │       ├── contract.hbs
+│   │       │       ├── helpers.js
+│   │       │       ├── page.hbs
+│   │       │       └── properties.js
+│   │       ├── eslint.config.mjs
+│   │       ├── foundry.toml
+│   │       ├── FUNDING.json
+│   │       ├── fv-requirements.txt
+│   │       ├── GUIDELINES.md
+│   │       ├── hardhat
+│   │       │   ├── async-test-sanity.js
+│   │       │   ├── env-artifacts.js
+│   │       │   ├── ignore-unreachable-warnings.js
+│   │       │   ├── remappings.js
+│   │       │   ├── skip-foundry-tests.js
+│   │       │   └── task-test-get-files.js
+│   │       ├── hardhat.config.js
+│   │       ├── lib
+│   │       │   ├── erc4626-tests
+│   │       │   │   ├── ERC4626.prop.sol
+│   │       │   │   ├── ERC4626.test.sol
+│   │       │   │   ├── LICENSE
+│   │       │   │   └── README.md
+│   │       │   ├── forge-std
+│   │       │   │   ├── CONTRIBUTING.md
+│   │       │   │   ├── foundry.toml
+│   │       │   │   ├── LICENSE-APACHE
+│   │       │   │   ├── LICENSE-MIT
+│   │       │   │   ├── package.json
+│   │       │   │   ├── README.md
+│   │       │   │   ├── scripts
+│   │       │   │   ├── src
+│   │       │   │   └── test
+│   │       │   └── halmos-cheatcodes
+│   │       │       ├── LICENSE
+│   │       │       ├── README.md
+│   │       │       └── src
+│   │       ├── LICENSE
+│   │       ├── logo.svg
+│   │       ├── netlify.toml
+│   │       ├── package-lock.json
+│   │       ├── package.json
+│   │       ├── README.md
+│   │       ├── RELEASING.md
+│   │       ├── remappings.txt
+│   │       ├── renovate.json
+│   │       ├── scripts
+│   │       │   ├── checks
+│   │       │   │   ├── compare-layout.js
+│   │       │   │   ├── compareGasReports.js
+│   │       │   │   ├── coverage.sh
+│   │       │   │   ├── extract-layout.js
+│   │       │   │   ├── generation.sh
+│   │       │   │   ├── inheritance-ordering.js
+│   │       │   │   └── pragma-validity.js
+│   │       │   ├── fetch-common-contracts.js
+│   │       │   ├── gen-nav.js
+│   │       │   ├── generate
+│   │       │   │   ├── format-lines.js
+│   │       │   │   ├── helpers
+│   │       │   │   ├── run.js
+│   │       │   │   └── templates
+│   │       │   ├── get-contracts-metadata.js
+│   │       │   ├── git-user-config.sh
+│   │       │   ├── helpers.js
+│   │       │   ├── minimize-pragma.js
+│   │       │   ├── prepack.sh
+│   │       │   ├── prepare-docs.sh
+│   │       │   ├── release
+│   │       │   │   ├── format-changelog.js
+│   │       │   │   ├── synchronize-versions.js
+│   │       │   │   ├── update-comment.js
+│   │       │   │   ├── version.sh
+│   │       │   │   └── workflow
+│   │       │   ├── remove-ignored-artifacts.js
+│   │       │   ├── set-max-old-space-size.sh
+│   │       │   ├── solc-versions.js
+│   │       │   ├── solhint-custom
+│   │       │   │   ├── index.js
+│   │       │   │   └── package.json
+│   │       │   ├── update-docs-branch.js
+│   │       │   └── upgradeable
+│   │       │       ├── alias
+│   │       │       ├── patch-apply.sh
+│   │       │       ├── patch-save.sh
+│   │       │       ├── README.md
+│   │       │       ├── transpile-onto.sh
+│   │       │       ├── transpile.sh
+│   │       │       └── upgradeable.patch
+│   │       ├── SECURITY.md
+│   │       ├── slither.config.json
+│   │       ├── solhint.config.js
+│   │       └── test
+│   │           ├── access
+│   │           │   ├── AccessControl.behavior.js
+│   │           │   ├── AccessControl.test.js
+│   │           │   ├── extensions
+│   │           │   ├── manager
+│   │           │   ├── Ownable.test.js
+│   │           │   └── Ownable2Step.test.js
+│   │           ├── account
+│   │           │   ├── Account.behavior.js
+│   │           │   ├── Account.test.js
+│   │           │   ├── AccountECDSA.test.js
+│   │           │   ├── AccountERC7702.t.sol
+│   │           │   ├── AccountERC7702.test.js
+│   │           │   ├── AccountERC7913.test.js
+│   │           │   ├── AccountMultiSigner.test.js
+│   │           │   ├── AccountMultiSignerWeighted.test.js
+│   │           │   ├── AccountP256.test.js
+│   │           │   ├── AccountRSA.test.js
+│   │           │   ├── AccountWebAuthn.test.js
+│   │           │   ├── examples
+│   │           │   ├── extensions
+│   │           │   └── utils
+│   │           ├── crosschain
+│   │           │   └── ERC7786Recipient.test.js
+│   │           ├── finance
+│   │           │   ├── VestingWallet.behavior.js
+│   │           │   ├── VestingWallet.test.js
+│   │           │   └── VestingWalletCliff.test.js
+│   │           ├── governance
+│   │           │   ├── extensions
+│   │           │   ├── Governor.t.sol
+│   │           │   ├── Governor.test.js
+│   │           │   ├── TimelockController.test.js
+│   │           │   └── utils
+│   │           ├── helpers
+│   │           │   ├── access-manager.js
+│   │           │   ├── account.js
+│   │           │   ├── chains.js
+│   │           │   ├── constants.js
+│   │           │   ├── deploy.js
+│   │           │   ├── eip712-types.js
+│   │           │   ├── eip712.js
+│   │           │   ├── enums.js
+│   │           │   ├── erc4337.js
+│   │           │   ├── erc7579.js
+│   │           │   ├── erc7739.js
+│   │           │   ├── governance.js
+│   │           │   ├── iterate.js
+│   │           │   ├── math.js
+│   │           │   ├── methods.js
+│   │           │   ├── precompiles.js
+│   │           │   ├── random.js
+│   │           │   ├── signers.js
+│   │           │   ├── storage.js
+│   │           │   ├── strings.js
+│   │           │   ├── time.js
+│   │           │   └── txpool.js
+│   │           ├── metatx
+│   │           │   ├── ERC2771Context.test.js
+│   │           │   ├── ERC2771Forwarder.t.sol
+│   │           │   └── ERC2771Forwarder.test.js
+│   │           ├── proxy
+│   │           │   ├── beacon
+│   │           │   ├── Clones.behaviour.js
+│   │           │   ├── Clones.t.sol
+│   │           │   ├── Clones.test.js
+│   │           │   ├── ERC1967
+│   │           │   ├── Proxy.behaviour.js
+│   │           │   ├── transparent
+│   │           │   └── utils
+│   │           ├── sanity.test.js
+│   │           ├── TESTING.md
+│   │           ├── token
+│   │           │   ├── common
+│   │           │   ├── ERC1155
+│   │           │   ├── ERC20
+│   │           │   ├── ERC6909
+│   │           │   └── ERC721
+│   │           └── utils
+│   │               ├── Address.test.js
+│   │               ├── Arrays.t.sol
+│   │               ├── Arrays.test.js
+│   │               ├── Base58.t.sol
+│   │               ├── Base58.test.js
+│   │               ├── Base64.t.sol
+│   │               ├── Base64.test.js
+│   │               ├── Blockhash.t.sol
+│   │               ├── Blockhash.test.js
+│   │               ├── Bytes.t.sol
+│   │               ├── Bytes.test.js
+│   │               ├── CAIP.test.js
+│   │               ├── Calldata.test.js
+│   │               ├── Context.behavior.js
+│   │               ├── Context.test.js
+│   │               ├── Create2.t.sol
+│   │               ├── Create2.test.js
+│   │               ├── cryptography
+│   │               ├── draft-InteroperableAddress.t.sol
+│   │               ├── draft-InteroperableAddress.test.js
+│   │               ├── introspection
+│   │               ├── LowLevelCall.test.js
+│   │               ├── math
+│   │               ├── Memory.t.sol
+│   │               ├── Memory.test.js
+│   │               ├── Multicall.test.js
+│   │               ├── Nonces.behavior.js
+│   │               ├── Nonces.test.js
+│   │               ├── NoncesKeyed.t.sol
+│   │               ├── NoncesKeyed.test.js
+│   │               ├── Packing.t.sol
+│   │               ├── Packing.test.js
+│   │               ├── Panic.test.js
+│   │               ├── Pausable.test.js
+│   │               ├── ReentrancyGuard.test.js
+│   │               ├── RelayedCall.test.js
+│   │               ├── RLP.t.sol
+│   │               ├── RLP.test.js
+│   │               ├── ShortStrings.t.sol
+│   │               ├── ShortStrings.test.js
+│   │               ├── SlotDerivation.t.sol
+│   │               ├── SlotDerivation.test.js
+│   │               ├── StorageSlot.test.js
+│   │               ├── Strings.t.sol
+│   │               ├── Strings.test.js
+│   │               ├── structs
+│   │               ├── TransientSlot.test.js
+│   │               └── types
+│   ├── README.md
+│   ├── script
+│   │   ├── ConfigureIntegration.s.sol
+│   │   ├── DeployAll.s.sol
+│   │   ├── DeployCreditWeave.s.sol
+│   │   ├── DeployRWAContracts.s.sol
+│   │   └── SeedLiquidity.s.sol
+│   ├── src
+│   │   ├── interface
+│   │   │   ├── ICashFlowLogic.sol
+│   │   │   ├── IReceiver.sol
+│   │   │   └── ReceiverTemplate.sol
+│   │   ├── InvestorShareToken.sol
+│   │   ├── NAVOracle.sol
+│   │   ├── RentalCashFlowLogic.sol
+│   │   ├── RWAAssetRegistry.sol
+│   │   ├── RWACommonTypes.sol
+│   │   ├── RWALendingPool.sol
+│   │   ├── RWARevenueVault.sol
+│   │   └── UnderwritingRegistry.sol
+│   └── test
+│       ├── E2E.t.sol
+│       ├── Integrations.t.sol
+│       ├── InvestorShareToken.t.sol
+│       ├── mocks
+│       │   ├── MockAssetRegistry.sol
+│       │   ├── MockCashFlowLogic.sol
+│       │   ├── MockERC20.sol
+│       │   ├── MockForwarder.sol
+│       │   ├── MockNAVOracle.sol
+│       │   ├── MockRegistry.sol
+│       │   ├── MockUnderwriting.sol
+│       │   └── MockVault.sol
+│       ├── NAVOracle.t.sol
+│       ├── RentalCashFlowLogic.t.sol
+│       ├── RWAAssetRegistry.t.sol
+│       ├── RWALendingPool.t.sol
+│       ├── RWARevenueVault.t.sol
+│       └── UnderwritingRegistry.t.sol
+├── cre
+│   ├── my-workflow
+│   │   ├── bun.lock
+│   │   ├── config.production.json
+│   │   ├── config.staging.json
+│   │   ├── main.ts
+│   │   ├── package.json
+│   │   ├── README.md
+│   │   ├── tsconfig.json
+│   │   └── workflow.yaml
+│   ├── project.yaml
+│   └── secrets.yaml
+├── frontend
+│   ├── app
+│   │   ├── favicon.ico
+│   │   ├── globals.css
+│   │   ├── layout.tsx
+│   │   └── page.tsx
+│   ├── eslint.config.mjs
+│   ├── next-env.d.ts
+│   ├── next.config.ts
+│   ├── package-lock.json
+│   ├── package.json
+│   ├── postcss.config.mjs
+│   ├── public
+│   │   ├── file.svg
+│   │   ├── globe.svg
+│   │   ├── next.svg
+│   │   ├── vercel.svg
+│   │   └── window.svg
+│   ├── README.md
+│   └── tsconfig.json
+└── project-structure.txt
+
+132 directories, 517 files
