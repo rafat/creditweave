@@ -6,6 +6,7 @@ dotenv.config();
 
 const app = express();
 const port = process.env.PORT || 3001;
+const strictUnknownBorrowers = process.env.STRICT_UNKNOWN_BORROWERS !== 'false';
 
 // Middleware
 app.use(cors());
@@ -17,7 +18,12 @@ app.use(express.json());
 // Enforces that only callers (CRE) with the correct Bearer token can access
 const authenticate = (req: Request, res: Response, next: NextFunction): void => {
     const authHeader = req.headers.authorization;
-    const expectedToken = process.env.CRE_API_KEY || 'sk_test_12345';
+    const expectedToken = process.env.CRE_API_KEY;
+
+    if (!expectedToken) {
+        res.status(500).json({ error: 'CRE_API_KEY is not configured on server' });
+        return;
+    }
 
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
         res.status(401).json({ error: 'Missing or malformed Authorization header' });
@@ -85,14 +91,15 @@ app.use('/api', authenticate);
 // 1. Financials Endpoint
 app.get('/api/financials/:borrowerId', (req: Request, res: Response): void => {
     const { borrowerId } = req.params;
-    const data = mockBorrowerData[borrowerId.toLowerCase()];
+    const normalizedId = Array.isArray(borrowerId) ? borrowerId[0] : borrowerId;
+    const data = mockBorrowerData[normalizedId.toLowerCase()];
 
     if (!data) {
-        // Return a default baseline for unregistered wallets
+        // Conservative baseline for unknown borrowers
         res.json({
-            incomeStabilityScore: 0.70,
-            debtToIncome: 0.45,
-            averageMonthlyFreeCashFlow: 2000
+            incomeStabilityScore: 0.55,
+            debtToIncome: 0.58,
+            averageMonthlyFreeCashFlow: 1200
         });
         return;
     }
@@ -103,14 +110,15 @@ app.get('/api/financials/:borrowerId', (req: Request, res: Response): void => {
 // 2. Credit Endpoint
 app.get('/api/credit/:borrowerId', (req: Request, res: Response): void => {
     const { borrowerId } = req.params;
-    const data = mockBorrowerData[borrowerId.toLowerCase()];
+    const normalizedId = Array.isArray(borrowerId) ? borrowerId[0] : borrowerId;
+    const data = mockBorrowerData[normalizedId.toLowerCase()];
 
     if (!data) {
-        // Return a default baseline
+        // Conservative baseline for unknown borrowers
         res.json({
-            creditRiskScore: 0.75,
-            pastRepaymentScore: 0.80,
-            publicBankruptcies: false
+            creditRiskScore: 0.52,
+            pastRepaymentScore: 0.58,
+            publicBankruptcies: true
         });
         return;
     }
@@ -121,10 +129,20 @@ app.get('/api/credit/:borrowerId', (req: Request, res: Response): void => {
 // 3. Compliance Endpoint
 app.get('/api/compliance/:borrowerId', (req: Request, res: Response): void => {
     const { borrowerId } = req.params;
-    const data = mockBorrowerData[borrowerId.toLowerCase()];
+    const normalizedId = Array.isArray(borrowerId) ? borrowerId[0] : borrowerId;
+    const data = mockBorrowerData[normalizedId.toLowerCase()];
 
     if (!data) {
-        // Default pass for testing
+        // Fail-closed by default for unknown borrower profiles
+        if (strictUnknownBorrowers) {
+            res.json({
+                kycPassed: false,
+                amlFlag: true,
+                reason: 'PROFILE_NOT_FOUND'
+            });
+            return;
+        }
+
         res.json({
             kycPassed: true,
             amlFlag: false

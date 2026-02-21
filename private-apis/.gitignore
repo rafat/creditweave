@@ -3,3 +3,7 @@ dist/
 .env
 *.log
 .DS_Store
+
+PHASE2_IMPLEMENTATION.md
+GETTING_STARTED.md
+

@@ -1,3 +1,17 @@
 {
-  "schedule": "*/30 * * * * *"
+  "schedule": "*/30 * * * * *",
+  "underwritingRegistryAddress": "0x822325617f7eb4d8a4223b6b9c9273aa6dc9be4d",
+  "navOracleAddress": "0x4d9e4d926dbe9c8b145005be025641831dc8a603",
+  "lendingPoolAddress": "0xd6a371db1f7ac556552bb5be922898a921fe0744",
+  "rwaAssetRegistryAddress": "0xe1380bd2588ab172d4d5424a71486583f7e6ffcf",
+  "chainRpcUrl": "https://ethereum-sepolia-rpc.publicnode.com",
+  "chainId": 11155111,
+  "aiModelName": "gemini-2.0-flash",
+  "privateApiUrl": "http://localhost:3001",
+  "baseRateBps": 800,
+  "rateSpreadPerRiskTier": 150,
+  "maxLtvBaseBps": 7500,
+  "maxLtvReductionPerRiskTier": 500,
+  "chainSelectorName": "ethereum-testnet-sepolia",
+  "gasLimit": "500000"
 }
