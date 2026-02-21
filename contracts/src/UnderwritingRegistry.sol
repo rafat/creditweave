@@ -13,10 +13,12 @@ contract UnderwritingRegistry is ReceiverTemplate {
     }
 
     mapping(address => mapping(uint256 => UnderwritingTerms)) public terms;
+    mapping(address => mapping(uint256 => uint256)) public requestedBorrowAmount;
 
     event UnderwritingRequested(
         address indexed borrower,
-        uint256 indexed assetId
+        uint256 indexed assetId,
+        uint256 intendedBorrowAmount
     );
 
     event UnderwritingUpdated(
@@ -38,7 +40,12 @@ contract UnderwritingRegistry is ReceiverTemplate {
     // ------------------------------------------------------------
 
     function requestUnderwriting(uint256 assetId) external {
-        emit UnderwritingRequested(msg.sender, assetId);
+        requestUnderwriting(assetId, 0);
+    }
+
+    function requestUnderwriting(uint256 assetId, uint256 intendedBorrowAmount) public {
+        requestedBorrowAmount[msg.sender][assetId] = intendedBorrowAmount;
+        emit UnderwritingRequested(msg.sender, assetId, intendedBorrowAmount);
     }
 
     // ------------------------------------------------------------
@@ -70,6 +77,7 @@ contract UnderwritingRegistry is ReceiverTemplate {
             expiry: expiry,
             reasoningHash: reasoningHash
         });
+        delete requestedBorrowAmount[borrower][assetId];
 
         emit UnderwritingUpdated(
             borrower,
@@ -102,5 +110,13 @@ contract UnderwritingRegistry is ReceiverTemplate {
     {
         UnderwritingTerms storage t = terms[borrower][assetId];
         return t.approved && t.expiry > block.timestamp;
+    }
+
+    function getRequestedBorrowAmount(address borrower, uint256 assetId)
+        external
+        view
+        returns (uint256)
+    {
+        return requestedBorrowAmount[borrower][assetId];
     }
 }

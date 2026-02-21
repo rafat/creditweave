@@ -14,7 +14,8 @@ contract UnderwritingRegistryTest is Test {
 
     event UnderwritingRequested(
         address indexed borrower,
-        uint256 indexed assetId
+        uint256 indexed assetId,
+        uint256 intendedBorrowAmount
     );
 
     function setUp() public {
@@ -27,10 +28,16 @@ contract UnderwritingRegistryTest is Test {
     // ------------------------------------------------------------
 
     function testRequestUnderwritingEmitsEvent() public {
-        vm.expectEmit(true, true, false, false);
-        emit UnderwritingRequested(address(this), assetId);
+        vm.expectEmit(true, true, false, true);
+        emit UnderwritingRequested(address(this), assetId, 5000);
 
-        registry.requestUnderwriting(assetId);
+        registry.requestUnderwriting(assetId, 5000);
+    }
+
+    function testRequestUnderwritingStoresBorrowIntent() public {
+        registry.requestUnderwriting(assetId, 12_345);
+        uint256 requested = registry.getRequestedBorrowAmount(address(this), assetId);
+        assertEq(requested, 12_345);
     }
 
     // ------------------------------------------------------------
@@ -57,6 +64,9 @@ contract UnderwritingRegistryTest is Test {
     // ------------------------------------------------------------
 
     function testValidReportStoresTerms() public {
+        vm.prank(borrower);
+        registry.requestUnderwriting(assetId, 7_500);
+
         bytes memory report = abi.encode(
             borrower,
             assetId,
@@ -76,6 +86,7 @@ contract UnderwritingRegistryTest is Test {
         assertEq(rateBps, 900);
         assertGt(expiry, block.timestamp);
         assertEq(reasoningHash, keccak256("reason"));
+        assertEq(registry.getRequestedBorrowAmount(borrower, assetId), 0);
 
     }
 

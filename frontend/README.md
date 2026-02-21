@@ -1,116 +1,73 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# CreditWeave Frontend
 
-## Getting Started
+Next.js app for the borrower, investor, and admin dashboards.
 
-First, run the development server:
+## Routes
+
+- `/borrower`: underwriting request + borrow flow
+- `/investor`: pool and asset observability
+- `/admin`: chain, API, and CRE signal health
+
+## Environment
+
+Copy `.env.example` to `.env.local` and set values:
 
 ```bash
+cp .env.example .env.local
+```
+
+Required public variables:
+
+- `NEXT_PUBLIC_SEPOLIA_RPC_URL`
+- `NEXT_PUBLIC_UNDERWRITING_REGISTRY`
+- `NEXT_PUBLIC_NAV_ORACLE`
+- `NEXT_PUBLIC_LENDING_POOL`
+- `NEXT_PUBLIC_RWA_ASSET_REGISTRY`
+- `NEXT_PUBLIC_PRIVATE_API_URL`
+
+If a value is missing or invalid, the app falls back to defaults and logs a warning.
+
+## Local Development
+
+```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open `http://localhost:3000`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Quality Gates
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Run before each merge/demo:
 
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
-
-## Contract Calls (RWAAssetRegistry)
-
-These are the recommended, frontend-friendly getters:
-
-1. `getAssetCore(uint256)`
-2. `getAssetSchedule(uint256)`
-3. `getAssetLinks(uint256)`
-4. `getAssetMetadata(uint256)`
-
-Example (viem):
-
-```ts
-const abi = [
-  {
-    name: "getAssetCore",
-    type: "function",
-    stateMutability: "view",
-    inputs: [{ name: "assetId", type: "uint256" }],
-    outputs: [
-      { name: "assetId", type: "uint256" },
-      { name: "assetType", type: "uint8" },
-      { name: "originator", type: "address" },
-      { name: "currentStatus", type: "uint8" },
-      { name: "assetValue", type: "uint256" },
-      { name: "accumulatedYield", type: "uint256" },
-    ],
-  },
-  {
-    name: "getAssetSchedule",
-    type: "function",
-    stateMutability: "view",
-    inputs: [{ name: "assetId", type: "uint256" }],
-    outputs: [
-      { name: "nextPaymentDueDate", type: "uint256" },
-      { name: "expectedMonthlyPayment", type: "uint256" },
-      { name: "expectedMaturityDate", type: "uint256" },
-    ],
-  },
-  {
-    name: "getAssetLinks",
-    type: "function",
-    stateMutability: "view",
-    inputs: [{ name: "assetId", type: "uint256" }],
-    outputs: [
-      { name: "logicContract", type: "address" },
-      { name: "vaultContract", type: "address" },
-      { name: "tokenContract", type: "address" },
-    ],
-  },
-  {
-    name: "getAssetMetadata",
-    type: "function",
-    stateMutability: "view",
-    inputs: [{ name: "assetId", type: "uint256" }],
-    outputs: [
-      { name: "ipfsMetadataHash", type: "string" },
-      { name: "registrationDate", type: "uint256" },
-      { name: "activationDate", type: "uint256" },
-      { name: "valuationOracle", type: "address" },
-    ],
-  },
-];
-
-const core = await publicClient.readContract({
-  address: registryAddress,
-  abi,
-  functionName: "getAssetCore",
-  args: [assetId],
-});
-
-const schedule = await publicClient.readContract({
-  address: registryAddress,
-  abi,
-  functionName: "getAssetSchedule",
-  args: [assetId],
-});
+```bash
+npm run lint
+npx tsc --noEmit
 ```
 
-If you’re using `ethers`, the same ABI works with `new ethers.Contract(...)`.
+Or run both at once:
+
+```bash
+npm run check
+```
+
+## CI
+
+GitHub Actions workflow: `.github/workflows/frontend-ci.yml`
+
+It runs on frontend changes and enforces:
+
+1. `npm run check`
+2. `npm run build`
+
+## Demo QA Checklist (Item 11)
+
+1. Wallet connects in MetaMask and shows Sepolia chain id `11155111`.
+2. Wrong-network guard appears and switch action works.
+3. Borrower page submits `requestUnderwriting(assetId, intendedBorrowAmount)`.
+4. Borrower status card refreshes pending amount and terms after confirmation.
+5. Borrow action is blocked when terms are expired, NAV is stale, or approval is false.
+6. Borrow action succeeds for valid terms and amount.
+7. Investor page loads pool, asset, and recent underwriting outcomes.
+8. Admin page shows chain health, private API health, and CRE event signal.
+9. No console runtime errors during common flows.
