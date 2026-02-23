@@ -1,81 +1,41 @@
 # CreditWeave CRE Underwriting Workflow
 
-Privacy-first underwriting workflow for CreditWeave phase 2.
+Privacy-first institutional underwriting workflow for CreditWeave.
 
 ## What This Workflow Does
 
 1. Listens to `UnderwritingRequested` events on `UnderwritingRegistry`.
 2. Reads onchain context:
    - `RWAAssetRegistry.getAssetCore(assetId)`
+   - `RWAAssetRegistry.getAssetMetadata(assetId)` (retrieves property physical address)
    - `NAVOracle.isFresh(assetId)` and `NAVOracle.getNAVData(assetId)`
    - `UnderwritingRegistry.getRequestedBorrowAmount(borrower, assetId)`
-3. Fetches confidential borrower data from private APIs:
-   - `/api/financials/:borrower`
-   - `/api/credit/:borrower`
-   - `/api/compliance/:borrower`
-4. Runs deterministic underwriting policy (binding terms).
-5. Runs Gemini only for explanation memo (non-binding).
-6. Hashes explanation JSON with UTF-8 safe keccak256 and writes minimal terms onchain.
+3. Fetches confidential borrower and asset data from consolidated private APIs:
+   - `/api/borrower-data/:borrower` (aggregate financials, credit, compliance)
+   - `/api/assets/:assetId?address=...` (live geographic property data)
+4. Runs institutional **DSCR (Debt Service Coverage Ratio)** underwriting policy.
+5. Runs Gemini (Expert CRE Credit Officer) for deep qualitative qualitative analysis.
+6. Hashes analysis JSON and writes minimal terms onchain.
 
-Only minimal terms are posted onchain:
-- `approved`
-- `maxLtvBps`
-- `rateBps`
-- `expiry`
-- `reasoningHash`
+## Institutional Risk Model
 
-## Current Event + Request Flow
+Deterministic logic computes binding terms using CRE industry standards:
+- **DSCR is King**: Base Risk Tier is determined by `Rental Income / Debt Payment`.
+- **Borrower Health**: Credit score and DTI are used as secondary qualifying factors.
+- **Risk Tiers**:
+  - Tier 1 (Prime): DSCR >= 1.5
+  - Tier 2 (Standard): DSCR >= 1.25
+  - Tier 3 (Watch): DSCR >= 1.1
+  - Tier 4 (Substandard): DSCR >= 1.0
+  - Tier 5 (Default Risk): DSCR < 1.0
+- **Dynamic Modifiers**:
+  - NAV volatility stress bump (`navVolatility > 0.08` => tier +1)
+  - Macro `HIGH` rate environment: `rateBps + 100`
+  - Macro `DECLINING` property trend: `maxLtvBps - 500`
 
-Borrower request:
+## AI Qualitative Analysis Layer
 
-```solidity
-requestUnderwriting(uint256 assetId, uint256 intendedBorrowAmount)
-```
-
-Observed event:
-
-```solidity
-event UnderwritingRequested(
-  address indexed borrower,
-  uint256 indexed assetId,
-  uint256 intendedBorrowAmount
-);
-```
-
-Workflow uses the registry pending value as source of truth:
-- If pending requested amount is `0`, it skips processing.
-- If event intended amount mismatches registry pending value, it skips processing.
-- This prevents stale/replayed events from re-underwriting cleared requests.
-
-## Safety Gates Implemented
-
-- Asset status deny list (`DEFAULTED`, `LIQUIDATING`, `PAUSED`)
-- NAV freshness / non-zero NAV enforcement
-- Requested amount must be present and consistent
-- Requested LTV must be within computed max LTV
-- Compliance hard-denies:
-  - KYC not passed
-  - AML flagged
-  - Public bankruptcy present
-
-## Deterministic Risk Model
-
-Deterministic logic computes binding terms:
-- `riskTier`
-- `maxLtvBps`
-- `rateBps`
-- `approved`
-
-Enhancements included:
-- Cashflow health scoring (`PERFORMING/GRACE_PERIOD/LATE/DEFAULTED`)
-- Macro modifiers:
-  - `HIGH` rate environment: `rateBps + 100`
-  - `DECLINING` property trend: `maxLtvBps - 500`
-- NAV volatility stress bump (`navVolatility > 0.1` => tier +1)
-
-## AI Explanation Layer
-
-Gemini is used only for explanation JSON, not for binding terms.
+Gemini acts as an **Expert CRE Credit Officer**, providing a deep qualitative assessment.
 
 Expected explanation JSON:
 
@@ -88,73 +48,32 @@ Expected explanation JSON:
 }
 ```
 
-Onchain hash strategy:
+## Safety Gates Implemented
 
-```ts
-reasoningHash = keccak256(toHex(new TextEncoder().encode(JSON.stringify(explanation))))
-```
+- Asset status deny list (`DEFAULTED`, `LIQUIDATING`, `PAUSED`)
+- NAV freshness / non-zero NAV enforcement
+- Compliance hard-denies (KYC/AML flags)
+- DSCR minimum threshold enforcement
 
-## Config
+## Workflow Config & Limits
 
-Workflow config files:
-- `config.staging.json`
-- `config.production.json`
+The workflow is optimized to run with fewer than 5 HTTP calls by using consolidated API endpoints, remaining within CRE capability limits.
 
-Required fields:
-- `underwritingRegistryAddress`
-- `navOracleAddress`
-- `lendingPoolAddress`
-- `rwaAssetRegistryAddress`
-- `chainSelectorName` (Sepolia selector name)
-- `privateApiUrl`
-- `aiModelName` (for Gemini)
-- `baseRateBps`
-- `rateSpreadPerRiskTier`
-- `maxLtvBaseBps`
-- `maxLtvReductionPerRiskTier`
-- `gasLimit`
-
-## Secrets
-
-`cre/secrets.yaml` maps:
-- `GEMINI_API_KEY` -> `GEMINI_API_KEY_ALL`
-- `CRE_API_KEY` -> `CRE_API_KEY_ALL`
-- `WORKFLOW_OWNER_PRIVATE_KEY` -> `WORKFLOW_OWNER_PRIVATE_KEY_ALL`
-
-Workflow runtime reads:
-- `CRE_API_KEY` for private APIs
-- `GEMINI_API_KEY` for explanation generation
+Required secrets in `cre/secrets.yaml`:
+- `GEMINI_API_KEY`: For Expert AI analysis
+- `CRE_API_KEY`: For authenticated Private API access
+- `WORKFLOW_OWNER_PRIVATE_KEY`: For signing onchain reports
 
 ## Local Run
 
 1. Start private API server:
-
 ```bash
 cd private-apis
-npm install
 npm run dev
 ```
 
-2. Compile type check:
-
-```bash
-cd cre/my-workflow
-bun x tsc --noEmit
-```
-
-3. Simulate workflow:
-
+2. Simulate workflow:
 ```bash
 cd cre
 cre workflow simulate ./my-workflow -T staging-settings
 ```
-
-For event-trigger simulation, provide:
-- tx hash containing `UnderwritingRequested`
-- event index for that log
-
-## Notes
-
-- This workflow is designed for confidential underwriting, not public data disclosure.
-- Deterministic engine is the source of truth for credit terms.
-- LLM output is explanatory only.

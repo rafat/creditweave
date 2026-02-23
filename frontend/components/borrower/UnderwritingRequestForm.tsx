@@ -13,6 +13,7 @@ type Props = {
   setIntendedBorrowInput: (value: string) => void;
   onRefreshReads: () => void;
   onTxStateChange: (tx: TxState) => void;
+  onUnderwritingRequestSubmitted?: (hash: `0x${string}`) => void;
 };
 
 const toBigInt = (value: string): bigint | null => {
@@ -30,6 +31,7 @@ export default function UnderwritingRequestForm({
   setIntendedBorrowInput,
   onRefreshReads,
   onTxStateChange,
+  onUnderwritingRequestSubmitted,
 }: Props) {
   const { address, isConnected } = useAccount();
   const currentChainId = useChainId();
@@ -73,6 +75,7 @@ export default function UnderwritingRequestForm({
         hash,
         message: "Transaction submitted. Waiting for confirmation...",
       });
+      onUnderwritingRequestSubmitted?.(hash);
     } catch (error) {
       onTxStateChange({
         phase: "failed",

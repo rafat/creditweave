@@ -83,10 +83,40 @@ export const LENDING_POOL_ABI = [
   {
     type: "function",
     stateMutability: "nonpayable",
+    name: "depositCollateral",
+    inputs: [
+      { name: "assetId", type: "uint256" },
+      { name: "amount", type: "uint256" },
+    ],
+    outputs: [],
+  },
+  {
+    type: "function",
+    stateMutability: "nonpayable",
     name: "borrow",
     inputs: [
       { name: "assetId", type: "uint256" },
       { name: "amount", type: "uint256" },
+    ],
+    outputs: [],
+  },
+  {
+    type: "function",
+    stateMutability: "nonpayable",
+    name: "setAssetToken",
+    inputs: [
+      { name: "assetId", type: "uint256" },
+      { name: "token", type: "address" },
+    ],
+    outputs: [],
+  },
+  {
+    type: "function",
+    stateMutability: "nonpayable",
+    name: "setAssetLogic",
+    inputs: [
+      { name: "assetId", type: "uint256" },
+      { name: "logic", type: "address" },
     ],
     outputs: [],
   },
@@ -128,6 +158,44 @@ export const ERC20_ABI = [
 export const RWA_ASSET_REGISTRY_ABI = [
   {
     type: "function",
+    stateMutability: "nonpayable",
+    name: "registerAsset",
+    inputs: [
+      { name: "_assetType", type: "uint8" },
+      { name: "_originator", type: "address" },
+      { name: "_assetValue", type: "uint256" },
+      { name: "_ipfsMetadataHash", type: "string" },
+    ],
+    outputs: [{ name: "assetId", type: "uint256" }],
+  },
+  {
+    type: "function",
+    stateMutability: "nonpayable",
+    name: "linkContracts",
+    inputs: [
+      { name: "_assetId", type: "uint256" },
+      { name: "_logicContract", type: "address" },
+      { name: "_vaultContract", type: "address" },
+      { name: "_token", type: "address" },
+    ],
+    outputs: [],
+  },
+  {
+    type: "function",
+    stateMutability: "nonpayable",
+    name: "activateAsset",
+    inputs: [{ name: "_assetId", type: "uint256" }],
+    outputs: [],
+  },
+  {
+    type: "function",
+    stateMutability: "nonpayable",
+    name: "verifyKYC",
+    inputs: [{ name: "_address", type: "address" }],
+    outputs: [],
+  },
+  {
+    type: "function",
     stateMutability: "view",
     name: "getAssetCore",
     inputs: [{ name: "assetId", type: "uint256" }],
@@ -138,6 +206,18 @@ export const RWA_ASSET_REGISTRY_ABI = [
       { name: "currentStatus", type: "uint8" },
       { name: "assetValue", type: "uint256" },
       { name: "accumulatedYield", type: "uint256" },
+    ],
+  },
+  {
+    type: "function",
+    stateMutability: "view",
+    name: "getAssetMetadata",
+    inputs: [{ name: "assetId", type: "uint256" }],
+    outputs: [
+      { name: "ipfsMetadataHash", type: "string" },
+      { name: "registrationDate", type: "uint256" },
+      { name: "activationDate", type: "uint256" },
+      { name: "valuationOracle", type: "address" },
     ],
   },
 ] as const;

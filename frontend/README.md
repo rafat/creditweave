@@ -4,9 +4,16 @@ Next.js app for the borrower, investor, and admin dashboards.
 
 ## Routes
 
-- `/borrower`: underwriting request + borrow flow
+- `/borrower`: Tokenization wizard + underwriting request + borrow flow
 - `/investor`: pool and asset observability
 - `/admin`: chain, API, and CRE signal health
+
+## Tokenization Wizard
+
+The Borrower dashboard includes a **Step 1: Tokenize Property** wizard.
+- **Functionality**: Users input a real-world address and property value.
+- **Backend**: The `/api/rpc/tokenize` route executes the `contracts/script/TokenizeAsset.s.sol` Foundry script.
+- **Result**: Automates asset registration, contract deployment (Logic, Vault, Token), linking, and minting of 10,000 shares to the user's wallet.
 
 ## Environment
 
@@ -18,14 +25,21 @@ cp .env.example .env.local
 
 Required public variables:
 
-- `NEXT_PUBLIC_SEPOLIA_RPC_URL`
 - `NEXT_PUBLIC_UNDERWRITING_REGISTRY`
 - `NEXT_PUBLIC_NAV_ORACLE`
 - `NEXT_PUBLIC_LENDING_POOL`
 - `NEXT_PUBLIC_RWA_ASSET_REGISTRY`
 - `NEXT_PUBLIC_PRIVATE_API_URL`
 
-If a value is missing or invalid, the app falls back to defaults and logs a warning.
+Required server-side variables (for `/api/rpc/tokenize`):
+
+- `ADMIN_PRIVATE_KEY`: Private key with permissions to register and activate assets.
+- `SEPOLIA_RPC_URL`: RPC URL for Foundry script execution.
+
+RPC configuration:
+
+- `SEPOLIA_RPC_URL` (recommended): used by server-side `/api/rpc` proxy, avoids browser CORS and keeps provider key private.
+- `NEXT_PUBLIC_SEPOLIA_RPC_URL`: no longer used by app transport (kept intentionally disabled to avoid CORS failures).
 
 ## Local Development
 

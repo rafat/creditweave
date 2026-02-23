@@ -7,6 +7,7 @@ import {
   CONTRACTS,
   LENDING_POOL_ABI,
   NAV_ORACLE_ABI,
+  RWA_ASSET_REGISTRY_ABI,
 } from "@/lib/contracts";
 import { normalizeTxError, type TxState } from "@/lib/tx";
 import type { TermsTuple } from "@/lib/underwriting";
@@ -17,6 +18,19 @@ type Props = {
   terms?: TermsTuple;
   onTxStateChange: (tx: TxState) => void;
 };
+
+const ASSET_TYPES = ["REAL_ESTATE", "INVOICE", "BOND", "COMMODITY"] as const;
+const ASSET_STATUSES = [
+  "REGISTERED",
+  "LINKED",
+  "ACTIVE",
+  "UNDER_REVIEW",
+  "DEFAULTED",
+  "LIQUIDATING",
+  "LIQUIDATED",
+  "PAUSED",
+  "EXPIRED",
+] as const;
 
 const toBigInt = (value: string): bigint | null => {
   try {
@@ -48,7 +62,9 @@ export default function BorrowForm({ assetIdInput, terms, onTxStateChange }: Pro
     args: address && assetId !== null ? [address, assetId] : undefined,
     query: {
       enabled: Boolean(address && assetId !== null && chainId === SUPPORTED_CHAIN_ID),
-      refetchInterval: 8_000,
+      refetchInterval: false,
+      refetchOnWindowFocus: false,
+      refetchOnReconnect: false,
     },
   });
 
@@ -60,7 +76,9 @@ export default function BorrowForm({ assetIdInput, terms, onTxStateChange }: Pro
     args: address && assetId !== null ? [address, assetId] : undefined,
     query: {
       enabled: Boolean(address && assetId !== null && chainId === SUPPORTED_CHAIN_ID),
-      refetchInterval: 8_000,
+      refetchInterval: false,
+      refetchOnWindowFocus: false,
+      refetchOnReconnect: false,
     },
   });
 
@@ -72,7 +90,9 @@ export default function BorrowForm({ assetIdInput, terms, onTxStateChange }: Pro
     args: assetId !== null ? [assetId] : undefined,
     query: {
       enabled: Boolean(assetId !== null && chainId === SUPPORTED_CHAIN_ID),
-      refetchInterval: 8_000,
+      refetchInterval: false,
+      refetchOnWindowFocus: false,
+      refetchOnReconnect: false,
     },
   });
 
@@ -84,7 +104,23 @@ export default function BorrowForm({ assetIdInput, terms, onTxStateChange }: Pro
     args: assetId !== null ? [assetId] : undefined,
     query: {
       enabled: Boolean(assetId !== null && chainId === SUPPORTED_CHAIN_ID),
-      refetchInterval: 8_000,
+      refetchInterval: false,
+      refetchOnWindowFocus: false,
+      refetchOnReconnect: false,
+    },
+  });
+
+  const assetCoreRead = useReadContract({
+    chainId: SUPPORTED_CHAIN_ID,
+    address: contracts.rwaAssetRegistry,
+    abi: RWA_ASSET_REGISTRY_ABI,
+    functionName: "getAssetCore",
+    args: assetId !== null ? [assetId] : undefined,
+    query: {
+      enabled: Boolean(assetId !== null && chainId === SUPPORTED_CHAIN_ID),
+      refetchInterval: false,
+      refetchOnWindowFocus: false,
+      refetchOnReconnect: false,
     },
   });
 
@@ -92,6 +128,13 @@ export default function BorrowForm({ assetIdInput, terms, onTxStateChange }: Pro
   const debtPrincipal = ((debtRead.data as [bigint, bigint] | undefined)?.[0] ?? 0n);
   const navIsFresh = Boolean(navFreshRead.data);
   const nav = ((navDataRead.data as [bigint, bigint, `0x${string}`] | undefined)?.[0] ?? 0n);
+  const assetCore = assetCoreRead.data as
+    | [bigint, number, `0x${string}`, number, bigint, bigint]
+    | undefined;
+  const assetType = assetCore ? ASSET_TYPES[assetCore[1]] ?? `UNKNOWN(${assetCore[1]})` : "N/A";
+  const assetStatus = assetCore ? ASSET_STATUSES[assetCore[3]] ?? `UNKNOWN(${assetCore[3]})` : "N/A";
+  const assetOriginator = assetCore?.[2] ?? "N/A";
+  const registeredAssetValue = assetCore?.[4] ?? 0n;
 
   const collateralValue = (collateralShares * nav) / 10n ** 18n;
   const maxBorrowFromTerms = (collateralValue * BigInt(maxLtvBps)) / 10_000n;
@@ -168,6 +211,34 @@ export default function BorrowForm({ assetIdInput, terms, onTxStateChange }: Pro
       </div>
 
       <div className="mt-4 space-y-2 text-sm">
+        <p className="flex justify-between">
+          <span>RWA collateral type</span>
+          <span className="mono">{assetType}</span>
+        </p>
+        <p className="flex justify-between">
+          <span>RWA collateral status</span>
+          <span className="mono">{assetStatus}</span>
+        </p>
+        <p className="flex justify-between">
+          <span>RWA registered asset value</span>
+          <span className="mono">{formatUnits(registeredAssetValue, 18)} tokens</span>
+        </p>
+        <p className="flex justify-between">
+          <span>RWA originator</span>
+          <span className="mono">{assetOriginator}</span>
+        </p>
+        <p className="flex justify-between">
+          <span>Collateral (shares)</span>
+          <span className="mono">{formatUnits(collateralShares, 18)}</span>
+        </p>
+        <p className="flex justify-between">
+          <span>NAV (per share)</span>
+          <span className="mono">{formatUnits(nav, 18)} tokens</span>
+        </p>
+        <p className="flex justify-between">
+          <span>Estimated collateral value</span>
+          <span className="mono">{formatUnits(collateralValue, 18)} tokens</span>
+        </p>
         <p className="flex justify-between">
           <span>Term approval</span>
           <span className="mono">{approved ? "approved" : "not approved"}</span>

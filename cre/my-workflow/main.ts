@@ -7,7 +7,7 @@ import {
   EVMClient,
   type EVMLog,
   hexToBase64,
-  LAST_FINALIZED_BLOCK_NUMBER,
+  LATEST_BLOCK_NUMBER,
   Runner,
   TxStatus,
   type Runtime,
@@ -20,6 +20,7 @@ const UNDERWRITING_EVENT_ABI = parseAbi([
 
 const ASSET_REGISTRY_ABI = parseAbi([
   "function getAssetCore(uint256) view returns (uint256 assetId, uint8 assetType, address originator, uint8 currentStatus, uint256 assetValue, uint256 accumulatedYield)",
+  "function getAssetMetadata(uint256) view returns (string ipfsMetadataHash, uint256 registrationDate, uint256 activationDate, address valuationOracle)",
 ]);
 
 const NAV_ORACLE_ABI = parseAbi([
@@ -130,6 +131,11 @@ type NavSnapshot = {
   isFresh: boolean;
 };
 
+type NavComputationResult = {
+  nav: bigint;
+  sourceHash: `0x${string}`;
+};
+
 const clamp = (value: number, min: number, max: number): number => {
   return Math.min(max, Math.max(min, value));
 };
@@ -159,6 +165,18 @@ const logAudit = (runtime: Runtime<Config>, event: string, data: Record<string, 
       event,
       ...data,
     })}`,
+  );
+};
+
+const logStep = (
+  runtime: Runtime<Config>,
+  requestId: string,
+  step: string,
+  message: string,
+  data?: Record<string, unknown>,
+) => {
+  runtime.log(
+    `[STEP ${step}] requestId=${requestId} ${message}${data ? ` | ${JSON.stringify(data)}` : ""}`,
   );
 };
 
@@ -220,10 +238,7 @@ const postJsonWithConfidentialHttp = (
               multiHeaders: Object.fromEntries(
                 Object.entries(requestHeaders).map(([key, value]) => [key, { values: [value] }]),
               ) as any,
-              body: {
-                case: "bodyBytes" as const,
-                value: new TextEncoder().encode(requestBody),
-              },
+              bodyString: requestBody,
             },
           })
           .result();
@@ -246,33 +261,57 @@ const fetchOnchainAssetData = (
   evmClient: EVMClient,
   registryAddress: Address,
   assetId: bigint,
-): { assetValue: bigint; currentStatus: number } => {
-  const callData = encodeFunctionData({
+): { assetValue: bigint; currentStatus: number; metadataHash: string } => {
+  const callDataCore = encodeFunctionData({
     abi: ASSET_REGISTRY_ABI,
     functionName: "getAssetCore",
     args: [assetId],
   });
 
-  const result = evmClient
+  const resultCore = evmClient
     .callContract(runtime, {
       call: encodeCallMsg({
         from: zeroAddress,
         to: registryAddress,
-        data: callData,
+        data: callDataCore,
       }),
-      blockNumber: LAST_FINALIZED_BLOCK_NUMBER,
+      blockNumber: LATEST_BLOCK_NUMBER,
     })
     .result();
 
-  const decoded = decodeFunctionResult({
+  const decodedCore = decodeFunctionResult({
     abi: ASSET_REGISTRY_ABI,
     functionName: "getAssetCore",
-    data: bytesToHex(result.data),
+    data: bytesToHex(resultCore.data),
+  });
+
+  const callDataMetadata = encodeFunctionData({
+    abi: ASSET_REGISTRY_ABI,
+    functionName: "getAssetMetadata",
+    args: [assetId],
+  });
+
+  const resultMetadata = evmClient
+    .callContract(runtime, {
+      call: encodeCallMsg({
+        from: zeroAddress,
+        to: registryAddress,
+        data: callDataMetadata,
+      }),
+      blockNumber: LATEST_BLOCK_NUMBER,
+    })
+    .result();
+
+  const decodedMetadata = decodeFunctionResult({
+    abi: ASSET_REGISTRY_ABI,
+    functionName: "getAssetMetadata",
+    data: bytesToHex(resultMetadata.data),
   });
 
   return {
-    assetValue: decoded[4],
-    currentStatus: Number(decoded[3]),
+    assetValue: decodedCore[4],
+    currentStatus: Number(decodedCore[3]),
+    metadataHash: decodedMetadata[0] as string,
   };
 };
 
@@ -295,7 +334,7 @@ const fetchNavSnapshot = (
         to: navOracleAddress,
         data: isFreshCallData,
       }),
-      blockNumber: LAST_FINALIZED_BLOCK_NUMBER,
+      blockNumber: LATEST_BLOCK_NUMBER,
     })
     .result();
 
@@ -318,7 +357,7 @@ const fetchNavSnapshot = (
         to: navOracleAddress,
         data: navDataCallData,
       }),
-      blockNumber: LAST_FINALIZED_BLOCK_NUMBER,
+      blockNumber: LATEST_BLOCK_NUMBER,
     })
     .result();
 
@@ -356,7 +395,7 @@ const fetchRequestedBorrowAmount = (
         to: registryAddress,
         data: callData,
       }),
-      blockNumber: LAST_FINALIZED_BLOCK_NUMBER,
+      blockNumber: LATEST_BLOCK_NUMBER,
     })
     .result();
 
@@ -379,23 +418,17 @@ const fetchBorrowerData = (
       "Content-Type": "application/json",
     };
 
-    const financials = fetchJsonWithConfidentialHttp(
+    const data = fetchJsonWithConfidentialHttp(
       runtime,
-      `${privateApiUrl}/api/financials/${borrower}`,
+      `${privateApiUrl}/api/borrower-data/${borrower}`,
       authHeaders,
-    ) as Record<string, number>;
+    ) as {
+      financials: Record<string, number>;
+      credit: Record<string, number | boolean>;
+      compliance: Record<string, boolean>;
+    };
 
-    const credit = fetchJsonWithConfidentialHttp(
-      runtime,
-      `${privateApiUrl}/api/credit/${borrower}`,
-      authHeaders,
-    ) as Record<string, number | boolean>;
-
-    const compliance = fetchJsonWithConfidentialHttp(
-      runtime,
-      `${privateApiUrl}/api/compliance/${borrower}`,
-      authHeaders,
-    ) as Record<string, boolean>;
+    const { financials, credit, compliance } = data;
 
     const monthlyIncome = Number(financials.averageMonthlyFreeCashFlow ?? 4000) * 2;
     const debtToIncome = Number(financials.debtToIncome ?? 0.4);
@@ -444,15 +477,47 @@ const fetchBorrowerData = (
   }
 };
 
-const fetchAssetPerformanceData = (): AssetMetrics => {
-  return {
-    cashflowHealth: "PERFORMING",
-    navVolatility: 0.04,
-    rentalCoverageRatio: 1.35,
-    propertyAgeYears: 5,
-    occupancyRate: 0.95,
-    marketAppreciation1Y: 0.03,
-  };
+const fetchAssetPerformanceData = (
+  runtime: Runtime<Config>,
+  assetId: bigint,
+  address: string,
+  privateApiUrl: string,
+  creApiKey: string,
+): AssetMetrics => {
+  try {
+    const authHeaders = {
+      Authorization: `Bearer ${creApiKey}`,
+      "Content-Type": "application/json",
+    };
+
+    const assetData = fetchJsonWithConfidentialHttp(
+      runtime,
+      `${privateApiUrl}/api/assets/${assetId.toString()}?address=${encodeURIComponent(address)}`,
+      authHeaders,
+    ) as Record<string, any>;
+
+    return {
+      cashflowHealth: (assetData.cashflowHealth as any) ?? "PERFORMING",
+      navVolatility: Number(assetData.navVolatility ?? 0.05),
+      rentalCoverageRatio: Number(assetData.rentalCoverageRatio ?? 1.2),
+      propertyAgeYears: Number(assetData.propertyAgeYears ?? 10),
+      occupancyRate: Number(assetData.occupancyRate ?? 0.9),
+      marketAppreciation1Y: Number(assetData.marketAppreciation1Y ?? 0.02),
+    };
+  } catch (error) {
+    logAudit(runtime, "asset_data_fetch_failed", {
+      assetId: assetId.toString(),
+      error: String(error),
+    });
+    return {
+      cashflowHealth: "PERFORMING",
+      navVolatility: 0.05,
+      rentalCoverageRatio: 1.2,
+      propertyAgeYears: 10,
+      occupancyRate: 0.9,
+      marketAppreciation1Y: 0.02,
+    };
+  }
 };
 
 const fetchMacroData = (): MacroContext => {
@@ -471,37 +536,35 @@ const deterministicUnderwriting = (
   maxLtvBaseBps: number,
   maxLtvReductionPerRiskTier: number,
 ): AIUnderwritingOutput => {
-  const cashflowScoreByHealth: Record<AssetMetrics["cashflowHealth"], number> = {
-    PERFORMING: 1,
-    GRACE_PERIOD: 0.7,
-    LATE: 0.4,
-    DEFAULTED: 0,
-  };
-  const cashflowScore = cashflowScoreByHealth[input.assetMetrics.cashflowHealth];
-
-  const borrowerScore =
-    input.borrowerMetrics.incomeStabilityScore * 0.25 +
-    input.borrowerMetrics.creditRiskScore * 0.3 +
-    (1 - input.borrowerMetrics.debtToIncome) * 0.25 +
-    input.borrowerMetrics.pastRepaymentScore * 0.2;
-
-  const assetScore =
-    cashflowScore * 0.4 +
-    (1 - input.assetMetrics.navVolatility) * 0.2 +
-    Math.min(1, input.assetMetrics.rentalCoverageRatio / 1.5) * 0.25 +
-    input.assetMetrics.occupancyRate * 0.15;
-
-  const compositeScore = borrowerScore * 0.6 + assetScore * 0.4;
+  // Institutional DSCR (Debt Service Coverage Ratio) Underwriting
+  // In CRE, the rentalCoverageRatio is effectively the DSCR.
+  const dscr = input.assetMetrics.rentalCoverageRatio;
+  
+  // Base borrower health
+  const borrowerHealth = 
+    (input.borrowerMetrics.creditRiskScore * 0.6) + 
+    ((1 - input.borrowerMetrics.debtToIncome) * 0.4);
 
   let riskTier: number;
-  if (compositeScore >= 0.85) riskTier = 1;
-  else if (compositeScore >= 0.75) riskTier = 2;
-  else if (compositeScore >= 0.65) riskTier = 3;
-  else if (compositeScore >= 0.55) riskTier = 4;
-  else riskTier = 5;
 
-  if (input.assetMetrics.navVolatility > 0.1) {
+  // Institutional Matrix: DSCR is King
+  if (dscr >= 1.5 && borrowerHealth >= 0.75) {
+    riskTier = 1; // Prime: High coverage, strong borrower
+  } else if (dscr >= 1.25 && borrowerHealth >= 0.65) {
+    riskTier = 2; // Standard: Meets institutional minimums (DSCR > 1.25)
+  } else if (dscr >= 1.1 && borrowerHealth >= 0.60) {
+    riskTier = 3; // Watch: Barely covering debt
+  } else if (dscr >= 1.0 || borrowerHealth >= 0.8) {
+    riskTier = 4; // Substandard: Might need out-of-pocket to cover debt
+  } else {
+    riskTier = 5; // Default Risk: Asset loses money, borrower is stretched
+  }
+
+  if (input.assetMetrics.navVolatility > 0.08) {
     riskTier = Math.min(5, riskTier + 1);
+  }
+  if (input.assetMetrics.cashflowHealth === "LATE" || input.assetMetrics.cashflowHealth === "DEFAULTED") {
+    riskTier = 5; // Override for actual poor performance
   }
 
   let maxLtvBps = Math.max(0, maxLtvBaseBps - (riskTier - 1) * maxLtvReductionPerRiskTier);
@@ -525,7 +588,7 @@ const deterministicUnderwriting = (
     maxLtvBps,
     rateBps,
     expiry: Number(expiry),
-    explanation: `Deterministic underwriting: score=${compositeScore.toFixed(4)}, tier=${riskTier}`,
+    explanation: `Deterministic underwriting: DSCR=${dscr.toFixed(2)}, tier=${riskTier}`,
   };
 };
 
@@ -610,8 +673,10 @@ const generateAIExplanation = (
   riskFlags: string[],
 ): AIExplanation => {
   const systemPrompt = [
-    "You are an institutional credit risk analyst for a regulated onchain RWA lending protocol.",
-    "Do not override deterministic decisions.",
+    "You are an expert institutional commercial real estate credit officer for a regulated onchain RWA lending protocol.",
+    "Your job is to provide a deep, qualitative analysis of the deterministic loan decision provided to you.",
+    "Explain the underlying reasons for the Risk Tier assigned based on standard CRE metrics like DSCR (Debt Service Coverage Ratio) and Borrower DTI.",
+    "Highlight specific strengths and weaknesses of the property and the borrower's financial profile.",
     "Return STRICT JSON only.",
     'Output schema: {"summary":"string","keyRisks":["string"],"confidenceLevel":"LOW|MEDIUM|HIGH","riskFlags":["string"]}.',
   ].join(" ");
@@ -688,6 +753,90 @@ const toSafeUsdNumber = (weiAmount: bigint): number => {
   return Number(wholeUnits);
 };
 
+const computeAndHashNav = (
+  assetId: bigint,
+  assetValue: bigint,
+  assetMetrics: AssetMetrics,
+  macroContext: MacroContext,
+): NavComputationResult => {
+  const trendAdjustmentBps: Record<MacroContext["propertyIndexTrend"], number> = {
+    RISING: 10300,
+    STABLE: 10000,
+    DECLINING: 9500,
+  };
+
+  const occupancyBps = clamp(Math.round(assetMetrics.occupancyRate * 10_000), 7000, 10_200);
+  const volatilityPenaltyBps = clamp(10_000 - Math.round(assetMetrics.navVolatility * 3000), 8500, 10_000);
+  const macroBps = trendAdjustmentBps[macroContext.propertyIndexTrend];
+
+  const nav =
+    (assetValue * BigInt(occupancyBps) * BigInt(volatilityPenaltyBps) * BigInt(macroBps)) /
+    (10_000n * 10_000n * 10_000n);
+
+  const sourceHash = keccak256(
+    encodeAbiParameters(
+      [
+        { type: "string" },
+        { type: "uint256" },
+        { type: "uint256" },
+        { type: "uint16" },
+        { type: "uint16" },
+        { type: "uint16" },
+      ],
+      [
+        "creditweave-nav-v1",
+        assetId,
+        assetValue,
+        occupancyBps,
+        volatilityPenaltyBps,
+        macroBps,
+      ],
+    ),
+  );
+
+  return { nav: nav > 0n ? nav : 1n, sourceHash };
+};
+
+const encodeNavReport = (assetId: bigint, nav: bigint, sourceHash: `0x${string}`): `0x${string}` => {
+  return encodeAbiParameters(
+    [{ type: "uint256" }, { type: "uint256" }, { type: "bytes32" }],
+    [assetId, nav, sourceHash],
+  );
+};
+
+const updateNavOnchain = (
+  runtime: Runtime<Config>,
+  evmClient: EVMClient,
+  navOracleAddress: Address,
+  assetId: bigint,
+  nav: bigint,
+  sourceHash: `0x${string}`,
+): `0x${string}` => {
+  const encodedPayload = encodeNavReport(assetId, nav, sourceHash);
+  const report = runtime
+    .report({
+      encodedPayload: hexToBase64(encodedPayload),
+      encoderName: "evm",
+      signingAlgo: "ecdsa",
+      hashingAlgo: "keccak256",
+    })
+    .result();
+
+  const writeResult = evmClient
+    .writeReport(runtime, {
+      receiver: navOracleAddress,
+      report,
+      gasConfig: runtime.config.gasLimit ? { gasLimit: runtime.config.gasLimit } : undefined,
+    })
+    .result();
+
+  if (writeResult.txStatus !== TxStatus.SUCCESS) {
+    throw new Error(`NAV write failed with status=${writeResult.txStatus}`);
+  }
+
+  return bytesToHex(writeResult.txHash || new Uint8Array(32));
+};
+
 const encodeUnderwritingReport = (terms: OnchainTerms): `0x${string}` => {
   return encodeAbiParameters(
     [
@@ -734,7 +883,10 @@ const onUnderwritingRequest = async (runtime: Runtime<Config>, eventLog: EVMLog)
     ),
   );
 
+  logStep(runtime, requestId, "0", "Trigger received: UnderwritingRequested log");
+
   if (processedRequestIds.has(requestId)) {
+    logStep(runtime, requestId, "0.1", "Replay detected in runtime cache, skipping");
     logAudit(runtime, "underwriting_replay_skipped", {
       requestId,
       borrower,
@@ -746,7 +898,13 @@ const onUnderwritingRequest = async (runtime: Runtime<Config>, eventLog: EVMLog)
   }
   processedRequestIds.add(requestId);
 
-  runtime.log(`Processing UnderwritingRequested borrower=${borrower}, assetId=${assetId.toString()}`);
+  logStep(runtime, requestId, "1", "Event decoded", {
+    borrower,
+    assetId: assetId.toString(),
+    txHash: txHashHex,
+    logIndex: eventLog.index,
+    intendedBorrowAmountFromEvent: intendedBorrowAmountFromEvent.toString(),
+  });
   logAudit(runtime, "underwriting_requested", {
     requestId,
     borrower,
@@ -755,10 +913,11 @@ const onUnderwritingRequest = async (runtime: Runtime<Config>, eventLog: EVMLog)
     logIndex: eventLog.index,
   });
 
+  logStep(runtime, requestId, "2", "Loading runtime secrets and onchain context");
   const creApiKey = getSecretValue(runtime, "CRE_API_KEY");
 
   const assetData = fetchOnchainAssetData(runtime, evmClient, rwaAssetRegistryAddress, assetId);
-  const navSnapshot = fetchNavSnapshot(runtime, evmClient, navOracleAddress, assetId);
+  let navSnapshot = fetchNavSnapshot(runtime, evmClient, navOracleAddress, assetId);
   const requestedBorrowAmountFromRegistry = fetchRequestedBorrowAmount(
     runtime,
     evmClient,
@@ -766,7 +925,15 @@ const onUnderwritingRequest = async (runtime: Runtime<Config>, eventLog: EVMLog)
     borrower,
     assetId,
   );
+  logStep(runtime, requestId, "3", "Onchain context loaded", {
+    assetStatus: assetData.currentStatus,
+    navIsFresh: navSnapshot.isFresh,
+    nav: navSnapshot.nav.toString(),
+    requestedBorrowAmountFromRegistry: requestedBorrowAmountFromRegistry.toString(),
+  });
+
   if (requestedBorrowAmountFromRegistry === 0n) {
+    logStep(runtime, requestId, "3.1", "No pending requested amount in registry, skipping");
     logAudit(runtime, "no_pending_request_skip", {
       requestId,
       borrower,
@@ -776,19 +943,17 @@ const onUnderwritingRequest = async (runtime: Runtime<Config>, eventLog: EVMLog)
     return true;
   }
   if (intendedBorrowAmountFromEvent > 0n && intendedBorrowAmountFromEvent !== requestedBorrowAmountFromRegistry) {
-    logAudit(runtime, "requested_borrow_amount_mismatch_skip", {
-      requestId,
-      borrower,
-      assetId: assetId.toString(),
+    logStep(runtime, requestId, "3.2", "Event amount and registry amount mismatch, proceeding with registry amount", {
       intendedBorrowAmountFromEvent: intendedBorrowAmountFromEvent.toString(),
       requestedBorrowAmountFromRegistry: requestedBorrowAmountFromRegistry.toString(),
     });
-    return true;
   }
   const requestedLoanAmount = requestedBorrowAmountFromRegistry;
+  logStep(runtime, requestId, "4", "Fetching confidential borrower signals and public context");
   const borrowerData = fetchBorrowerData(runtime, borrower, privateApiUrl, creApiKey);
-  const assetPerformance = fetchAssetPerformanceData();
+  const assetPerformance = fetchAssetPerformanceData(runtime, assetId, assetData.metadataHash, privateApiUrl, creApiKey);
   const macroData = fetchMacroData();
+  logStep(runtime, requestId, "4.1", "Context fetched (private borrower data kept offchain)");
 
   let safetyGateReason: string | null = null;
 
@@ -801,18 +966,53 @@ const onUnderwritingRequest = async (runtime: Runtime<Config>, eventLog: EVMLog)
       currentStatus: assetData.currentStatus,
     });
     safetyGateReason = `ASSET_STATUS_${assetData.currentStatus}`;
+    logStep(runtime, requestId, "5", "Safety gate triggered: denied asset status", {
+      currentStatus: assetData.currentStatus,
+    });
   }
 
   if (!safetyGateReason && (!navSnapshot.isFresh || navSnapshot.nav === 0n)) {
-    logAudit(runtime, "stale_or_missing_nav_deny", {
+    logStep(runtime, requestId, "5", "NAV stale/missing; computing and publishing NAV update");
+    const navComputation = computeAndHashNav(assetId, assetData.assetValue, assetPerformance, macroData);
+    const navUpdateTxHash = updateNavOnchain(
+      runtime,
+      evmClient,
+      navOracleAddress,
+      assetId,
+      navComputation.nav,
+      navComputation.sourceHash,
+    );
+    logAudit(runtime, "nav_updated_onchain", {
       requestId,
       borrower,
       assetId: assetId.toString(),
+      nav: navComputation.nav.toString(),
+      sourceHash: navComputation.sourceHash,
+      txHash: navUpdateTxHash,
+    });
+
+    navSnapshot = fetchNavSnapshot(runtime, evmClient, navOracleAddress, assetId);
+    logStep(runtime, requestId, "5.1", "NAV refresh check after update", {
       isFresh: navSnapshot.isFresh,
       nav: navSnapshot.nav.toString(),
       navUpdatedAt: navSnapshot.updatedAt.toString(),
     });
-    safetyGateReason = "STALE_OR_MISSING_NAV";
+
+    if (!navSnapshot.isFresh || navSnapshot.nav === 0n) {
+      logAudit(runtime, "stale_or_missing_nav_deny", {
+        requestId,
+        borrower,
+        assetId: assetId.toString(),
+        isFresh: navSnapshot.isFresh,
+        nav: navSnapshot.nav.toString(),
+        navUpdatedAt: navSnapshot.updatedAt.toString(),
+      });
+      safetyGateReason = "STALE_OR_MISSING_NAV";
+      logStep(runtime, requestId, "5.2", "Safety gate triggered: NAV still stale after update", {
+        isFresh: navSnapshot.isFresh,
+        nav: navSnapshot.nav.toString(),
+      });
+    }
   }
   const collateralValueNumber = toSafeUsdNumber(navSnapshot.nav);
   const requestedLoanAmountNumber = toSafeUsdNumber(requestedLoanAmount);
@@ -839,6 +1039,12 @@ const onUnderwritingRequest = async (runtime: Runtime<Config>, eventLog: EVMLog)
       runtime.config.maxLtvBaseBps,
       runtime.config.maxLtvReductionPerRiskTier,
     );
+  logStep(runtime, requestId, "6", "Deterministic underwriting evaluated", {
+    approved: aiOutput.approved,
+    riskTier: aiOutput.riskTier,
+    maxLtvBps: aiOutput.maxLtvBps,
+    rateBps: aiOutput.rateBps,
+  });
   logAudit(runtime, "underwriting_decision", {
     requestId,
     borrower,
@@ -859,6 +1065,10 @@ const onUnderwritingRequest = async (runtime: Runtime<Config>, eventLog: EVMLog)
       maxBorrowableFromTerms: maxBorrowableFromTerms.toString(),
       maxLtvBps: aiOutput.maxLtvBps,
     });
+    logStep(runtime, requestId, "7", "Requested amount exceeds max borrow from terms; forcing deny", {
+      requestedLoanAmount: requestedLoanAmount.toString(),
+      maxBorrowableFromTerms: maxBorrowableFromTerms.toString(),
+    });
     aiOutput = hardDenyOutput(
       "REQUESTED_LTV_EXCEEDS_MAX",
       runtime.config.baseRateBps,
@@ -868,6 +1078,7 @@ const onUnderwritingRequest = async (runtime: Runtime<Config>, eventLog: EVMLog)
 
   const geminiApiKey = getSecretValue(runtime, "GEMINI_API_KEY");
   const riskFlags = buildRiskFlags(aiInput, aiOutput, safetyGateReason);
+  logStep(runtime, requestId, "8", "Generating AI explanation (non-binding)");
   const aiExplanation = generateAIExplanation(
     runtime,
     runtime.config.aiModelName,
@@ -883,6 +1094,7 @@ const onUnderwritingRequest = async (runtime: Runtime<Config>, eventLog: EVMLog)
     riskFlags,
   );
   aiOutput.explanation = JSON.stringify(aiExplanation);
+  logStep(runtime, requestId, "8.1", "AI explanation generated and serialized");
 
   const terms: OnchainTerms = {
     borrower,
@@ -893,8 +1105,37 @@ const onUnderwritingRequest = async (runtime: Runtime<Config>, eventLog: EVMLog)
     expiry: BigInt(aiOutput.expiry),
     reasoningHash: keccak256(toHex(new TextEncoder().encode(aiOutput.explanation))),
   };
+  logStep(runtime, requestId, "9", "Prepared minimal onchain terms", {
+    approved: terms.approved,
+    maxLtvBps: terms.maxLtvBps,
+    rateBps: terms.rateBps,
+    expiry: terms.expiry.toString(),
+    reasoningHash: terms.reasoningHash,
+  });
+
+  try {
+    postJsonWithConfidentialHttp(
+      runtime,
+      `${privateApiUrl}/api/explanations`,
+      {
+        Authorization: `Bearer ${creApiKey}`,
+        "Content-Type": "application/json",
+      },
+      {
+        hash: terms.reasoningHash,
+        explanation: aiExplanation,
+      },
+    );
+    logStep(runtime, requestId, "9.1", "AI explanation securely pushed to private API");
+  } catch (err) {
+    logAudit(runtime, "explanation_push_failed", {
+      requestId,
+      error: String(err),
+    });
+  }
 
   const encodedPayload = encodeUnderwritingReport(terms);
+  logStep(runtime, requestId, "10", "Building signed CRE report");
   const report = runtime
     .report({
       encodedPayload: hexToBase64(encodedPayload),
@@ -904,6 +1145,9 @@ const onUnderwritingRequest = async (runtime: Runtime<Config>, eventLog: EVMLog)
     })
     .result();
 
+  logStep(runtime, requestId, "11", "Submitting report to UnderwritingRegistry via forwarder", {
+    receiver: underwritingRegistryAddress,
+  });
   const writeResult = evmClient
     .writeReport(runtime, {
       receiver: underwritingRegistryAddress,
@@ -917,9 +1161,14 @@ const onUnderwritingRequest = async (runtime: Runtime<Config>, eventLog: EVMLog)
   }
 
   const txHash = bytesToHex(writeResult.txHash || new Uint8Array(32));
-  runtime.log(
-    `Submitted report tx=${txHash}, borrower=${borrower}, assetId=${assetId.toString()}, approved=${aiOutput.approved}, ltv=${aiOutput.maxLtvBps}, rate=${aiOutput.rateBps}`,
-  );
+  logStep(runtime, requestId, "12", "Report submitted successfully", {
+    txHash,
+    borrower,
+    assetId: assetId.toString(),
+    approved: aiOutput.approved,
+    maxLtvBps: aiOutput.maxLtvBps,
+    rateBps: aiOutput.rateBps,
+  });
   logAudit(runtime, "underwriting_report_submitted", {
     requestId,
     borrower,
@@ -927,6 +1176,26 @@ const onUnderwritingRequest = async (runtime: Runtime<Config>, eventLog: EVMLog)
     txHash,
     approved: aiOutput.approved,
   });
+  return true;
+};
+
+const onRiskMonitorCron = async (runtime: Runtime<Config>) => {
+  logStep(runtime, "CRON", "1", "Starting Risk Monitor Agent");
+  
+  const macroData = fetchMacroData();
+  logStep(runtime, "CRON", "2", "Macro data fetched", macroData as unknown as Record<string, unknown>);
+
+  if (macroData.interestRateEnvironment === "HIGH" || macroData.propertyIndexTrend === "DECLINING") {
+    logAudit(runtime, "systemic_risk_detected", {
+      reason: "Adverse macro environment",
+      macroData: macroData as unknown as Record<string, unknown>,
+    });
+    // In a full implementation, this would trigger an onchain margin call or adjust risk tiers
+    // by fetching active loans and computing health factors.
+    logStep(runtime, "CRON", "3", "Systemic risk detected. Alert generated.");
+  } else {
+    logStep(runtime, "CRON", "3", "Macro environment stable. No action required.");
+  }
   return true;
 };
 
@@ -942,8 +1211,14 @@ const initWorkflow = (config: Config) => {
     addresses: [hexToBase64(config.underwritingRegistryAddress)],
     topics: [{ values: [hexToBase64(eventSignature)] }, { values: [] }, { values: [] }],
   });
+  
+  const cron = new cre.capabilities.CronCapability();
+  const cronTrigger = cron.trigger({ schedule: config.schedule ?? "0 0 * * *" }); // run daily by default
 
-  return [cre.handler(trigger, onUnderwritingRequest)];
+  return [
+    cre.handler(trigger, onUnderwritingRequest),
+    cre.handler(cronTrigger, onRiskMonitorCron),
+  ];
 };
 
 export async function main() {
