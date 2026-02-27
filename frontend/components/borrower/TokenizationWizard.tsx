@@ -66,8 +66,9 @@ export default function TokenizationWizard({ onTokenized, onTxStateChange }: Pro
       setPropertyAddress("");
       setAssetValue("");
       setRentAmount("");
-    } catch (error: any) {
-      onTxStateChange({ phase: "failed", message: error.message });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Tokenization failed";
+      onTxStateChange({ phase: "failed", message });
     } finally {
       setIsTokenizing(false);
     }

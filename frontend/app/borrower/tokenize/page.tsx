@@ -63,7 +63,7 @@ export default function TokenizePage() {
               </li>
               <li className="flex gap-3">
                 <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-blue-200 text-xs font-bold">2</span>
-                <span>Fractional share tokens (ERC20) equal to the property's market value are minted directly to your connected wallet.</span>
+                <span>Fractional share tokens (ERC20) equal to the property&apos;s market value are minted directly to your connected wallet.</span>
               </li>
               <li className="flex gap-3">
                 <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-blue-200 text-xs font-bold">3</span>

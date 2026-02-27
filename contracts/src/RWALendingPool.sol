@@ -2,6 +2,7 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 
@@ -10,6 +11,7 @@ import "./NAVOracle.sol";
 import "./interface/ICashFlowLogic.sol";
 
 contract RWALendingPool is ReentrancyGuard, Ownable {
+    using SafeERC20 for IERC20;
 
     // ------------------------------------------------------------
     // Core Dependencies
@@ -103,7 +105,7 @@ contract RWALendingPool is ReentrancyGuard, Ownable {
         address token = assetIdToToken[assetId];
         require(token != address(0), "Asset not configured");
 
-        IERC20(token).transferFrom(msg.sender, address(this), amount);
+        IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
 
         collateral[msg.sender][assetId] += amount;
 
@@ -125,7 +127,7 @@ contract RWALendingPool is ReentrancyGuard, Ownable {
         );
 
         address token = assetIdToToken[assetId];
-        IERC20(token).transfer(msg.sender, amount);
+        IERC20(token).safeTransfer(msg.sender, amount);
 
         emit CollateralWithdrawn(msg.sender, assetId, amount);
     }
@@ -155,7 +157,7 @@ contract RWALendingPool is ReentrancyGuard, Ownable {
         
         position.principal += amount;
 
-        stablecoin.transfer(msg.sender, amount);
+        stablecoin.safeTransfer(msg.sender, amount);
 
         if (position.lastAccrued == 0) {
             position.lastAccrued = block.timestamp;
@@ -178,7 +180,7 @@ contract RWALendingPool is ReentrancyGuard, Ownable {
         uint256 userDebt = position.principal;
         require(userDebt > 0, "No debt");
 
-        stablecoin.transferFrom(msg.sender, address(this), amount);
+        stablecoin.safeTransferFrom(msg.sender, address(this), amount);
 
         if (amount >= userDebt) {
             position.principal = 0;
@@ -230,7 +232,7 @@ contract RWALendingPool is ReentrancyGuard, Ownable {
 
 
         // Liquidator repays debt
-        stablecoin.transferFrom(msg.sender, address(this), repayAmount);
+        stablecoin.safeTransferFrom(msg.sender, address(this), repayAmount);
 
         position.principal -= repayAmount;
 
@@ -273,8 +275,8 @@ contract RWALendingPool is ReentrancyGuard, Ownable {
         collateral[user][assetId] -= totalShares;
 
         address token = assetIdToToken[assetId];
-        IERC20(token).transfer(msg.sender, liquidatorShares);
-        IERC20(token).transfer(treasury, protocolShares);
+        IERC20(token).safeTransfer(msg.sender, liquidatorShares);
+        IERC20(token).safeTransfer(treasury, protocolShares);
 
         emit Liquidated(user, assetId, repayAmount, totalShares);
     }
@@ -318,20 +320,20 @@ contract RWALendingPool is ReentrancyGuard, Ownable {
         address user,
         uint256 assetId
     ) internal view returns (uint256) {
-        (, uint16 underwritingLtv,,,) =
+        (, uint16 underwritingLtv, , uint256 creditLimit, , ) =
             registry.getTerms(user, assetId);
 
         if (!registry.isApproved(user, assetId)) {
             return 0;
         }
 
-
         uint256 effectiveLTV =
             _effectiveLTV(assetId, underwritingLtv);
 
-        uint256 value = _collateralValue(user, assetId);
-
-        return (value * effectiveLTV) / 10_000;
+        uint256 collateralCap = (_collateralValue(user, assetId) * effectiveLTV) / 10_000;
+        
+        // Return the minimum of the collateral capacity and the hard credit limit
+        return collateralCap < creditLimit ? collateralCap : creditLimit;
     }
 
     function _effectiveLTV(
@@ -386,7 +388,7 @@ contract RWALendingPool is ReentrancyGuard, Ownable {
             return;
         }
 
-        ( , , uint16 rateBps, , ) = registry.getTerms(user, assetId);
+        ( , , uint16 rateBps, , , ) = registry.getTerms(user, assetId);
 
         uint256 timeElapsed = block.timestamp - position.lastAccrued;
         if (timeElapsed == 0) return;
@@ -405,7 +407,7 @@ contract RWALendingPool is ReentrancyGuard, Ownable {
         DebtPosition memory position = debt[user][assetId];
         if (position.principal == 0) return 0;
 
-        ( , , uint16 rateBps, , ) = registry.getTerms(user, assetId);
+        ( , , uint16 rateBps, , , ) = registry.getTerms(user, assetId);
 
         uint256 timeElapsed = block.timestamp - position.lastAccrued;
 

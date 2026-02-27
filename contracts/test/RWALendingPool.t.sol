@@ -100,6 +100,33 @@ contract RWALendingPoolTest is Test {
         pool.borrow(1, 600_000 ether);
     }
 
+    function testBorrowFailsIfExceedsCreditLimit() public {
+        navOracle.setNAV(1, 1000 ether);
+        navOracle.setIsFresh(1, true);
+
+        // LTV would allow 500 ether, but credit limit is 100 ether
+        underwriting.setTermsWithLimit(
+            true,
+            5000, // 50%
+            1000,
+            100 ether, // Hard credit limit
+            block.timestamp + 1 days
+        );
+
+        // Deposit collateral
+        vm.prank(borrower);
+        pool.depositCollateral(1, 1000 ether);
+
+        vm.prank(borrower);
+        vm.expectRevert("Exceeds LTV"); // The error message is "Exceeds LTV" in the contract for both caps
+        pool.borrow(1, 101 ether);
+        
+        // Should succeed within credit limit
+        vm.prank(borrower);
+        pool.borrow(1, 50 ether);
+        assertEq(stable.balanceOf(borrower), 1_000_050 ether);
+    }
+
     // ------------------------------------------------------------
     // Expiry enforcement
     // ------------------------------------------------------------

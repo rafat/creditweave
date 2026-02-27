@@ -74,7 +74,7 @@ The system operates across three primary layers: the Frontend, the Confidential 
 
 ### 1. Smart Contracts (Solidity)
 The core DeFi primitives are built to trust the CRE's outputs blindly, acting purely as enforcement mechanisms.
-*   **`UnderwritingRegistry.sol`**: Receives signed reports from the CRE containing the underwriting terms (`approved`, `maxLtvBps`, `rateBps`, `expiry`, `reasoningHash`). It acts as the ultimate source of truth for a borrower's creditworthiness for a specific asset.
+*   **`UnderwritingRegistry.sol`**: Receives signed reports from the CRE containing the underwriting terms. Now includes **Nonce-based Replay Protection** and an explicit **Pending Request Flag** to ensure reports are only accepted for the latest active borrower request.
 *   **`NAVOracle.sol`**: Stores the Net Asset Value (NAV) of RWA collateral. Includes a `maxStaleness` mechanism. If a borrower requests a loan and the NAV is stale, the CRE will automatically compute and publish a fresh NAV before underwriting the loan.
 *   **`RWALendingPool.sol`**: The core lending engine. It dynamically computes `_maxBorrowable` and `healthFactor` by querying the `UnderwritingRegistry` for the borrower's specific LTV and Rate, and the `NAVOracle` for the asset's current value. It handles deposits, borrows, repayments, and liquidations.
 *   **`RWAAssetRegistry.sol`**: Manages the lifecycle of Real World Assets onchain, including registration, contract linking, and status tracking.
@@ -82,16 +82,23 @@ The core DeFi primitives are built to trust the CRE's outputs blindly, acting pu
 ### 2. Confidential Runtime Environment (CRE) Workflow
 The CRE (`my-workflow/main.ts`) is a secure, offchain worker powered by Chainlink's CRE SDK. It handles the heavy lifting without exposing secrets.
 *   **Institutional DSCR Underwriting Strategy**: The protocol uses the industry-standard **Debt Service Coverage Ratio (DSCR)** for underwriting. It calculates risk tiers based on property rental income versus debt obligations, ensuring institutional-grade credit decisions.
-*   **Expert AI Credit Officer**: The LLM (Gemini) acts as an expert credit officer, ingesting deterministic data and generating a deep, human-readable qualitative analysis of the borrower and property.
-*   **Confidential Data Aggregation**: Uses `ConfidentialHTTPClient` to securely request consolidated borrower financials and asset metrics from the Private API in a single aggregate call to remain within CRE capability limits.
+*   **Active AI Underwriting Agent**: The LLM (Gemini) acts as an active credit officer. It first generates a structured **Proposal JSON** (Risk Tier, LTV adjustments). This proposal is then passed through a **Deterministic Policy Gate** that enforces "tighten-only" logic and ignores low-confidence results, ensuring the AI influences terms safely.
+*   **Confidential Data Aggregation**: Uses a single consolidated `/api/v1/underwriting/context` call to securely request all borrower financials and asset metrics in one snapshot.
+*   **Audit Trail & Provenance**: Captures a `sourceHash` of all raw inputs used for the decision and pushes it alongside the AI analysis to the Private API, ensuring full auditability of the AI's reasoning.
 *   **Dynamic NAV Computation**: If the `NAVOracle` reports a stale valuation, the CRE dynamically computes a new NAV based on real-time asset metrics (occupancy, market trends, volatility) and posts it onchain before proceeding with underwriting.
 
 ### 3. Private API Proxy (`private-apis/src/server.ts`)
 An Express server that acts as a secure proxy between the CRE and real-world data providers.
-*   **Real Public API Integration**: Integrates with the **OpenStreetMap (Nominatim) API** to resolve real-world geographic data for property addresses.
-*   **Deterministic Pseudo-Random Metrics**: Generates realistic asset metrics (NAV volatility, rental yields) based on real geographic factors (e.g., coastal vs. inland risk).
-*   **Aggregate Confidential Endpoints**: Serves a consolidated `/api/borrower-data/:borrowerId` endpoint to minimize outbound CRE requests.
+*   **Provider-Realistic Endpoints**: Features raw vendor-like endpoints (Plaid, Experian, Onfido) and a normalized underwriting context endpoint for the CRE.
+*   **Provenance & Hashing**: Every response includes `sourceVersion`, `sourceHash`, and `reportId` to support institutional audit requirements.
+*   **Deterministic Scenario Generator**: Produces internally consistent borrower and asset data based on deterministic hashes, eliminating contradictory signals in mock data.
 *   **Plaintext Explanation Storage**: Provides a secure endpoint for the CRE to upload deep AI qualitative analysis, which the frontend then retrieves via a hashed public endpoint.
+
+### 4. Artifact Synchronization System (`scripts/sync-artifacts.js`)
+A coordination layer that ensures all folders (contracts, frontend, cre) share the same source of truth.
+*   **Automatic ABI Extraction**: Extracts clean ABIs from Foundry's build artifacts.
+*   **Unified Deployment Registry**: Generates a typed `index.ts` containing deployment addresses and ABIs, making contract updates seamless across the monorepo.
+
 
 ### 4. Frontend Application (Next.js)
 A modern dashboard for borrowers to interact with the protocol.

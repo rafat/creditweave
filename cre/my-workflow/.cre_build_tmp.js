@@ -17086,7 +17086,7 @@ init_encodeFunctionData();
 init_toHex();
 init_keccak256();
 var UNDERWRITING_EVENT_ABI = parseAbi([
-  "event UnderwritingRequested(address indexed borrower, uint256 indexed assetId, uint256 intendedBorrowAmount)"
+  "event UnderwritingRequested(address indexed borrower, uint256 indexed assetId, uint256 intendedBorrowAmount, uint64 nonce)"
 ]);
 var ASSET_REGISTRY_ABI = parseAbi([
   "function getAssetCore(uint256) view returns (uint256 assetId, uint8 assetType, address originator, uint8 currentStatus, uint256 assetValue, uint256 accumulatedYield)",
@@ -17128,6 +17128,24 @@ var logAudit = (runtime2, event, data) => {
 };
 var logStep = (runtime2, requestId, step, message, data) => {
   runtime2.log(`[STEP ${step}] requestId=${requestId} ${message}${data ? ` | ${JSON.stringify(data)}` : ""}`);
+};
+var fetchUnderwritingContext = (runtime2, borrower, assetId, addressOrMetadata, privateApiUrl, creApiKey) => {
+  const authHeaders = {
+    Authorization: `Bearer ${creApiKey}`,
+    "Content-Type": "application/json"
+  };
+  const url = `${privateApiUrl}/api/v1/underwriting/context` + `?borrowerId=${encodeURIComponent(borrower)}` + `&assetId=${encodeURIComponent(assetId.toString())}` + `&address=${encodeURIComponent(addressOrMetadata ?? "")}`;
+  const ctx = fetchJsonWithConfidentialHttp(runtime2, url, authHeaders);
+  if (!ctx || typeof ctx !== "object")
+    throw new Error("Bad context response");
+  if (!ctx.sourceHash)
+    throw new Error("Missing sourceHash in context response");
+  if (!ctx.borrower?.financials || !ctx.borrower?.credit || !ctx.borrower?.compliance) {
+    throw new Error("Missing borrower fields in context response");
+  }
+  if (!ctx.asset?.metrics)
+    throw new Error("Missing asset.metrics in context response");
+  return ctx;
 };
 var fetchJsonWithConfidentialHttp = (runtime2, url, headers) => {
   const rawBody = runtime2.runInNodeMode((nodeRuntime, ...args) => {
@@ -17276,89 +17294,6 @@ var fetchRequestedBorrowAmount = (runtime2, evmClient, registryAddress, borrower
     data: bytesToHex(result.data)
   });
 };
-var fetchBorrowerData = (runtime2, borrower, privateApiUrl, creApiKey) => {
-  try {
-    const authHeaders = {
-      Authorization: `Bearer ${creApiKey}`,
-      "Content-Type": "application/json"
-    };
-    const data = fetchJsonWithConfidentialHttp(runtime2, `${privateApiUrl}/api/borrower-data/${borrower}`, authHeaders);
-    const { financials, credit, compliance } = data;
-    const monthlyIncome = Number(financials.averageMonthlyFreeCashFlow ?? 4000) * 2;
-    const debtToIncome = Number(financials.debtToIncome ?? 0.4);
-    return {
-      borrowerMetrics: {
-        incomeStabilityScore: Number(financials.incomeStabilityScore ?? 0.75),
-        creditRiskScore: Number(credit.creditRiskScore ?? 0.72),
-        debtToIncome,
-        pastRepaymentScore: Number(credit.pastRepaymentScore ?? 0.85),
-        employmentLengthMonths: 36,
-        monthlyIncome,
-        monthlyExpenses: monthlyIncome * debtToIncome,
-        liquidAssets: monthlyIncome * 3,
-        totalLiabilities: monthlyIncome * 12 * debtToIncome
-      },
-      compliance: {
-        kycPassed: Boolean(compliance.kycPassed),
-        amlFlag: Boolean(compliance.amlFlag),
-        publicBankruptcies: Boolean(credit.publicBankruptcies)
-      }
-    };
-  } catch (error) {
-    logAudit(runtime2, "borrower_data_fetch_failed", {
-      borrower,
-      error: String(error)
-    });
-    return {
-      borrowerMetrics: {
-        incomeStabilityScore: 0.4,
-        creditRiskScore: 0.4,
-        debtToIncome: 0.8,
-        pastRepaymentScore: 0.4,
-        employmentLengthMonths: 0,
-        monthlyIncome: 0,
-        monthlyExpenses: 0,
-        liquidAssets: 0,
-        totalLiabilities: 0
-      },
-      compliance: {
-        kycPassed: false,
-        amlFlag: true,
-        publicBankruptcies: true
-      }
-    };
-  }
-};
-var fetchAssetPerformanceData = (runtime2, assetId, address, privateApiUrl, creApiKey) => {
-  try {
-    const authHeaders = {
-      Authorization: `Bearer ${creApiKey}`,
-      "Content-Type": "application/json"
-    };
-    const assetData = fetchJsonWithConfidentialHttp(runtime2, `${privateApiUrl}/api/assets/${assetId.toString()}?address=${encodeURIComponent(address)}`, authHeaders);
-    return {
-      cashflowHealth: assetData.cashflowHealth ?? "PERFORMING",
-      navVolatility: Number(assetData.navVolatility ?? 0.05),
-      rentalCoverageRatio: Number(assetData.rentalCoverageRatio ?? 1.2),
-      propertyAgeYears: Number(assetData.propertyAgeYears ?? 10),
-      occupancyRate: Number(assetData.occupancyRate ?? 0.9),
-      marketAppreciation1Y: Number(assetData.marketAppreciation1Y ?? 0.02)
-    };
-  } catch (error) {
-    logAudit(runtime2, "asset_data_fetch_failed", {
-      assetId: assetId.toString(),
-      error: String(error)
-    });
-    return {
-      cashflowHealth: "PERFORMING",
-      navVolatility: 0.05,
-      rentalCoverageRatio: 1.2,
-      propertyAgeYears: 10,
-      occupancyRate: 0.9,
-      marketAppreciation1Y: 0.02
-    };
-  }
-};
 var fetchMacroData = () => {
   return {
     propertyIndexTrend: "STABLE",
@@ -17461,7 +17396,70 @@ var buildRiskFlags = (input, decision, hardDenyReason) => {
     flags.push("HIGH_RISK_TIER");
   return Array.from(new Set(flags));
 };
-var generateAIExplanation = (runtime2, model, geminiApiKey, input, deterministicDecision, riskFlags) => {
+var generateLLMProposal = (runtime2, model, geminiApiKey, payload) => {
+  const systemPrompt = [
+    "You are an expert institutional credit officer.",
+    "Propose adjustments to the deterministic underwriting decision.",
+    "You MUST return STRICT JSON only.",
+    'Schema: {"riskTierProposal":1|2|3|4|5,"ltvDeltaBps":number,"rateDeltaBps":number,"confidence":"LOW|MEDIUM|HIGH","flags":["string"],"rationale":"string"}',
+    "Constraints:",
+    "- ltvDeltaBps must be between -500 and 0 (tighten-only).",
+    "- rateDeltaBps must be between 0 and 300 (tighten-only)."
+  ].join(" ");
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiApiKey}`;
+  try {
+    const response = postJsonWithConfidentialHttp(runtime2, url, {
+      "Content-Type": "application/json",
+      Accept: "application/json"
+    }, {
+      systemInstruction: { parts: [{ text: systemPrompt }] },
+      contents: [{ role: "user", parts: [{ text: JSON.stringify(payload) }] }],
+      generationConfig: {
+        temperature: 0.1,
+        responseMimeType: "application/json"
+      }
+    });
+    const text = String(response?.candidates?.[0]?.content?.parts?.[0]?.text ?? "");
+    const parsed = decodeJson(new TextEncoder().encode(stripCodeFences(text)));
+    const obj = asObject(parsed);
+    const confidenceRaw = String(obj.confidence ?? obj.confidenceLevel ?? "LOW").toUpperCase();
+    const confidence = confidenceRaw === "HIGH" || confidenceRaw === "MEDIUM" ? confidenceRaw : "LOW";
+    const riskTierProposal = clamp(Number(obj.riskTierProposal ?? 5), 1, 5);
+    const ltvDeltaBps = obj.ltvDeltaBps === undefined ? undefined : clamp(Number(obj.ltvDeltaBps), -500, 0);
+    const rateDeltaBps = obj.rateDeltaBps === undefined ? undefined : clamp(Number(obj.rateDeltaBps), 0, 300);
+    return {
+      riskTierProposal,
+      ltvDeltaBps,
+      rateDeltaBps,
+      confidence,
+      flags: toStringArray(obj.flags),
+      rationale: String(obj.rationale ?? "")
+    };
+  } catch (e) {
+    logAudit(runtime2, "llm_proposal_failed", { error: String(e) });
+    return null;
+  }
+};
+function applyPolicyWithLLM(baseline, proposal, config) {
+  let out = { ...baseline };
+  if (!proposal)
+    return out;
+  if (proposal.confidence === "LOW")
+    return out;
+  const proposedTier = clamp(proposal.riskTierProposal, 1, 5);
+  out.riskTier = Math.max(out.riskTier, proposedTier);
+  out.maxLtvBps = clamp(config.maxLtvBaseBps - (out.riskTier - 1) * config.maxLtvReductionPerRiskTier, 0, 1e4);
+  out.rateBps = Math.max(0, config.baseRateBps + (out.riskTier - 1) * config.rateSpreadPerRiskTier);
+  if (typeof proposal.ltvDeltaBps === "number") {
+    out.maxLtvBps = clamp(out.maxLtvBps + clamp(proposal.ltvDeltaBps, -500, 0), 0, 1e4);
+  }
+  if (typeof proposal.rateDeltaBps === "number") {
+    out.rateBps = Math.max(0, out.rateBps + clamp(proposal.rateDeltaBps, 0, 300));
+  }
+  out.approved = out.riskTier <= 4;
+  return out;
+}
+var generateAIExplanation = (runtime2, model, geminiApiKey, input, deterministicDecision, riskFlags, provenance) => {
   const systemPrompt = [
     "You are an expert institutional commercial real estate credit officer for a regulated onchain RWA lending protocol.",
     "Your job is to provide a deep, qualitative analysis of the deterministic loan decision provided to you.",
@@ -17477,7 +17475,12 @@ var generateAIExplanation = (runtime2, model, geminiApiKey, input, deterministic
     macroContext: input.macroContext,
     requestedLoanAmount: input.requestedLoanAmount,
     collateralValue: input.collateralValue,
-    deterministicRiskFlags: riskFlags
+    deterministicRiskFlags: riskFlags,
+    provenance: {
+      inputSourceHash: provenance?.inputSourceHash,
+      contextPulledAt: provenance?.contextPulledAt,
+      policyVersion: provenance?.policyVersion || "creditweave-underwriting-policy-v1"
+    }
   };
   try {
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiApiKey}`;
@@ -17539,7 +17542,7 @@ var computeAndHashNav = (assetId, assetValue, assetMetrics, macroContext) => {
   const occupancyBps = clamp(Math.round(assetMetrics.occupancyRate * 1e4), 7000, 10200);
   const volatilityPenaltyBps = clamp(1e4 - Math.round(assetMetrics.navVolatility * 3000), 8500, 1e4);
   const macroBps = trendAdjustmentBps[macroContext.propertyIndexTrend];
-  const nav = assetValue * BigInt(occupancyBps) * BigInt(volatilityPenaltyBps) * BigInt(macroBps) / (10000n * 10000n * 10000n);
+  const nav = 10n ** 18n * BigInt(occupancyBps) * BigInt(volatilityPenaltyBps) * BigInt(macroBps) / (10000n * 10000n * 10000n);
   const sourceHash = keccak256(encodeAbiParameters([
     { type: "string" },
     { type: "uint256" },
@@ -17582,17 +17585,21 @@ var encodeUnderwritingReport = (terms) => {
   return encodeAbiParameters([
     { type: "address" },
     { type: "uint256" },
+    { type: "uint64" },
     { type: "bool" },
     { type: "uint16" },
     { type: "uint16" },
+    { type: "uint256" },
     { type: "uint256" },
     { type: "bytes32" }
   ], [
     terms.borrower,
     terms.assetId,
+    terms.nonce,
     terms.approved,
     terms.maxLtvBps,
     terms.rateBps,
+    terms.creditLimit,
     terms.expiry,
     terms.reasoningHash
   ]);
@@ -17610,6 +17617,7 @@ var onUnderwritingRequest = async (runtime2, eventLog) => {
   const borrower = decodedEvent.args.borrower;
   const assetId = decodedEvent.args.assetId;
   const intendedBorrowAmountFromEvent = decodedEvent.args.intendedBorrowAmount;
+  const nonce = decodedEvent.args.nonce;
   const txHashHex = bytesToHex(eventLog.txHash);
   const requestId = keccak256(encodeAbiParameters([{ type: "address" }, { type: "uint256" }, { type: "bytes32" }, { type: "uint32" }], [borrower, assetId, txHashHex, eventLog.index]));
   logStep(runtime2, requestId, "0", "Trigger received: UnderwritingRequested log");
@@ -17630,14 +17638,16 @@ var onUnderwritingRequest = async (runtime2, eventLog) => {
     assetId: assetId.toString(),
     txHash: txHashHex,
     logIndex: eventLog.index,
-    intendedBorrowAmountFromEvent: intendedBorrowAmountFromEvent.toString()
+    intendedBorrowAmountFromEvent: intendedBorrowAmountFromEvent.toString(),
+    nonce: nonce.toString()
   });
   logAudit(runtime2, "underwriting_requested", {
     requestId,
     borrower,
     assetId: assetId.toString(),
     txHash: txHashHex,
-    logIndex: eventLog.index
+    logIndex: eventLog.index,
+    nonce: nonce.toString()
   });
   logStep(runtime2, requestId, "2", "Loading runtime secrets and onchain context");
   const creApiKey = getSecretValue(runtime2, "CRE_API_KEY");
@@ -17667,11 +17677,40 @@ var onUnderwritingRequest = async (runtime2, eventLog) => {
     });
   }
   const requestedLoanAmount = requestedBorrowAmountFromRegistry;
-  logStep(runtime2, requestId, "4", "Fetching confidential borrower signals and public context");
-  const borrowerData = fetchBorrowerData(runtime2, borrower, privateApiUrl, creApiKey);
-  const assetPerformance = fetchAssetPerformanceData(runtime2, assetId, assetData.metadataHash, privateApiUrl, creApiKey);
+  logStep(runtime2, requestId, "4", "Fetching normalized underwriting context (single confidential call)");
+  const ctx = fetchUnderwritingContext(runtime2, borrower, assetId, assetData.metadataHash, privateApiUrl, creApiKey);
+  const borrowerData = {
+    borrowerMetrics: {
+      incomeStabilityScore: Number(ctx.borrower.financials.incomeStabilityScore ?? 0.4),
+      creditRiskScore: Number(ctx.borrower.credit.creditRiskScore ?? 0.4),
+      debtToIncome: Number(ctx.borrower.financials.debtToIncome ?? 0.8),
+      pastRepaymentScore: Number(ctx.borrower.credit.pastRepaymentScore ?? 0.4),
+      employmentLengthMonths: 36,
+      monthlyIncome: Number(ctx.borrower.financials.monthlyIncome ?? 0),
+      monthlyExpenses: Number(ctx.borrower.financials.monthlyNonDebtExpenses ?? 0),
+      liquidAssets: Number(ctx.borrower.financials.monthlyIncome ?? 0) * 3,
+      totalLiabilities: Number(ctx.borrower.financials.monthlyDebtPayments ?? 0) * 12
+    },
+    compliance: {
+      kycPassed: Boolean(ctx.borrower.compliance.kycPassed),
+      amlFlag: Boolean(ctx.borrower.compliance.amlFlag),
+      publicBankruptcies: Boolean(ctx.borrower.credit.publicBankruptcies)
+    }
+  };
+  const assetPerformance = {
+    cashflowHealth: ctx.asset.metrics.cashflowHealth ?? "PERFORMING",
+    navVolatility: Number(ctx.asset.metrics.navVolatility ?? 0.05),
+    rentalCoverageRatio: Number(ctx.asset.metrics.rentalCoverageRatio ?? 1.2),
+    propertyAgeYears: Number(ctx.asset.metrics.propertyAgeYears ?? 10),
+    occupancyRate: Number(ctx.asset.metrics.occupancyRate ?? 0.9),
+    marketAppreciation1Y: Number(ctx.asset.metrics.marketAppreciation1Y ?? 0.02)
+  };
   const macroData = fetchMacroData();
-  logStep(runtime2, requestId, "4.1", "Context fetched (private borrower data kept offchain)");
+  logStep(runtime2, requestId, "4.1", "Context fetched", {
+    contextSourceHash: ctx.sourceHash,
+    borrowerScenario: ctx.borrower?.scenario,
+    assetScenario: ctx.asset?.scenario
+  });
   let safetyGateReason = null;
   const deniedStatuses = new Set([4, 5, 7]);
   if (deniedStatuses.has(assetData.currentStatus)) {
@@ -17720,7 +17759,8 @@ var onUnderwritingRequest = async (runtime2, eventLog) => {
       });
     }
   }
-  const collateralValueNumber = toSafeUsdNumber(navSnapshot.nav);
+  const totalAssetValue = navSnapshot.nav * assetData.assetValue / 10n ** 18n;
+  const collateralValueNumber = toSafeUsdNumber(totalAssetValue);
   const requestedLoanAmountNumber = toSafeUsdNumber(requestedLoanAmount);
   const aiInput = {
     borrowerMetrics: borrowerData.borrowerMetrics,
@@ -17729,75 +17769,100 @@ var onUnderwritingRequest = async (runtime2, eventLog) => {
     requestedLoanAmount: requestedLoanAmountNumber,
     collateralValue: collateralValueNumber
   };
-  let aiOutput = safetyGateReason ? hardDenyOutput(safetyGateReason, runtime2.config.baseRateBps, runtime2.config.rateSpreadPerRiskTier) : runUnderwritingPolicy(aiInput, borrowerData.compliance, runtime2.config.baseRateBps, runtime2.config.rateSpreadPerRiskTier, runtime2.config.maxLtvBaseBps, runtime2.config.maxLtvReductionPerRiskTier);
-  logStep(runtime2, requestId, "6", "Deterministic underwriting evaluated", {
-    approved: aiOutput.approved,
-    riskTier: aiOutput.riskTier,
-    maxLtvBps: aiOutput.maxLtvBps,
-    rateBps: aiOutput.rateBps
+  let baselineOutput = safetyGateReason ? hardDenyOutput(safetyGateReason, runtime2.config.baseRateBps, runtime2.config.rateSpreadPerRiskTier) : runUnderwritingPolicy(aiInput, borrowerData.compliance, runtime2.config.baseRateBps, runtime2.config.rateSpreadPerRiskTier, runtime2.config.maxLtvBaseBps, runtime2.config.maxLtvReductionPerRiskTier);
+  logStep(runtime2, requestId, "6", "Baseline deterministic underwriting evaluated", {
+    approved: baselineOutput.approved,
+    riskTier: baselineOutput.riskTier,
+    maxLtvBps: baselineOutput.maxLtvBps,
+    rateBps: baselineOutput.rateBps
+  });
+  const geminiApiKey = getSecretValue(runtime2, "GEMINI_API_KEY");
+  const riskFlags = buildRiskFlags(aiInput, baselineOutput, safetyGateReason);
+  logStep(runtime2, requestId, "7", "Generating LLM proposal (active agent involvement)");
+  const proposal = generateLLMProposal(runtime2, runtime2.config.aiModelName, geminiApiKey, {
+    baselineDecision: baselineOutput,
+    borrowerMetrics: aiInput.borrowerMetrics,
+    assetMetrics: aiInput.assetMetrics,
+    macroContext: aiInput.macroContext,
+    requestedLoanAmount: aiInput.requestedLoanAmount,
+    collateralValue: aiInput.collateralValue,
+    riskFlags
+  });
+  const finalOutput = applyPolicyWithLLM(baselineOutput, proposal, runtime2.config);
+  logStep(runtime2, requestId, "7.1", "Final underwriting decision after policy gate", {
+    approved: finalOutput.approved,
+    riskTier: finalOutput.riskTier,
+    maxLtvBps: finalOutput.maxLtvBps,
+    rateBps: finalOutput.rateBps,
+    agentConfidence: proposal?.confidence || "FALLBACK"
   });
   logAudit(runtime2, "underwriting_decision", {
     requestId,
     borrower,
     assetId: assetId.toString(),
-    approved: aiOutput.approved,
-    riskTier: aiOutput.riskTier,
-    maxLtvBps: aiOutput.maxLtvBps,
-    rateBps: aiOutput.rateBps
+    approved: finalOutput.approved,
+    riskTier: finalOutput.riskTier,
+    maxLtvBps: finalOutput.maxLtvBps,
+    rateBps: finalOutput.rateBps,
+    agentInvolvement: proposal ? "ACTIVE" : "BASELINE"
   });
-  const maxBorrowableFromTerms = navSnapshot.nav * BigInt(aiOutput.maxLtvBps) / 10000n;
-  if (requestedLoanAmount > maxBorrowableFromTerms) {
+  const totalAssetValueForLtv = navSnapshot.nav * assetData.assetValue / 10n ** 18n;
+  const maxBorrowableFromTerms = totalAssetValueForLtv * BigInt(finalOutput.maxLtvBps) / 10000n;
+  if (requestedLoanAmount > maxBorrowableFromTerms && finalOutput.approved) {
     logAudit(runtime2, "requested_ltv_exceeds_terms_deny", {
       requestId,
       borrower,
       assetId: assetId.toString(),
       requestedLoanAmount: requestedLoanAmount.toString(),
       maxBorrowableFromTerms: maxBorrowableFromTerms.toString(),
-      maxLtvBps: aiOutput.maxLtvBps
+      maxLtvBps: finalOutput.maxLtvBps
     });
-    logStep(runtime2, requestId, "7", "Requested amount exceeds max borrow from terms; forcing deny", {
+    logStep(runtime2, requestId, "8", "Requested amount exceeds max borrow from final terms; forcing deny", {
       requestedLoanAmount: requestedLoanAmount.toString(),
       maxBorrowableFromTerms: maxBorrowableFromTerms.toString()
     });
-    aiOutput = hardDenyOutput("REQUESTED_LTV_EXCEEDS_MAX", runtime2.config.baseRateBps, runtime2.config.rateSpreadPerRiskTier);
+    finalOutput.approved = false;
+    finalOutput.maxLtvBps = 0;
   }
-  const geminiApiKey = getSecretValue(runtime2, "GEMINI_API_KEY");
-  const riskFlags = buildRiskFlags(aiInput, aiOutput, safetyGateReason);
-  logStep(runtime2, requestId, "8", "Generating AI explanation (non-binding)");
+  logStep(runtime2, requestId, "9", "Generating AI explanation for final decision");
   const aiExplanation = generateAIExplanation(runtime2, runtime2.config.aiModelName, geminiApiKey, aiInput, {
-    approved: aiOutput.approved,
-    riskTier: aiOutput.riskTier,
-    maxLtvBps: aiOutput.maxLtvBps,
-    rateBps: aiOutput.rateBps,
-    expiry: aiOutput.expiry
-  }, riskFlags);
-  aiOutput.explanation = JSON.stringify(aiExplanation);
-  logStep(runtime2, requestId, "8.1", "AI explanation generated and serialized");
+    approved: finalOutput.approved,
+    riskTier: finalOutput.riskTier,
+    maxLtvBps: finalOutput.maxLtvBps,
+    rateBps: finalOutput.rateBps,
+    expiry: finalOutput.expiry
+  }, riskFlags, {
+    inputSourceHash: ctx.sourceHash,
+    contextPulledAt: ctx.pulledAt,
+    policyVersion: "creditweave-underwriting-policy-v1"
+  });
+  finalOutput.explanation = JSON.stringify(aiExplanation);
   const terms = {
     borrower,
     assetId,
-    approved: aiOutput.approved,
-    maxLtvBps: aiOutput.maxLtvBps,
-    rateBps: aiOutput.rateBps,
-    expiry: BigInt(aiOutput.expiry),
-    reasoningHash: keccak256(toHex(new TextEncoder().encode(aiOutput.explanation)))
+    nonce,
+    approved: finalOutput.approved,
+    maxLtvBps: finalOutput.maxLtvBps,
+    rateBps: finalOutput.rateBps,
+    creditLimit: requestedLoanAmount,
+    expiry: BigInt(finalOutput.expiry),
+    reasoningHash: keccak256(toHex(new TextEncoder().encode(finalOutput.explanation)))
   };
-  logStep(runtime2, requestId, "9", "Prepared minimal onchain terms", {
-    approved: terms.approved,
-    maxLtvBps: terms.maxLtvBps,
-    rateBps: terms.rateBps,
-    expiry: terms.expiry.toString(),
-    reasoningHash: terms.reasoningHash
-  });
   try {
-    postJsonWithConfidentialHttp(runtime2, `${privateApiUrl}/api/explanations`, {
+    postJsonWithConfidentialHttp(runtime2, `${privateApiUrl}/api/v1/explanations`, {
       Authorization: `Bearer ${creApiKey}`,
       "Content-Type": "application/json"
     }, {
       hash: terms.reasoningHash,
-      explanation: aiExplanation
+      explanation: aiExplanation,
+      meta: {
+        inputSourceHash: ctx.sourceHash,
+        model: runtime2.config.aiModelName,
+        policyVersion: "creditweave-underwriting-policy-v1",
+        contextPulledAt: ctx.pulledAt
+      }
     });
-    logStep(runtime2, requestId, "9.1", "AI explanation securely pushed to private API");
+    logStep(runtime2, requestId, "10.1", "AI explanation securely pushed to private API");
   } catch (err) {
     logAudit(runtime2, "explanation_push_failed", {
       requestId,
@@ -17805,14 +17870,14 @@ var onUnderwritingRequest = async (runtime2, eventLog) => {
     });
   }
   const encodedPayload = encodeUnderwritingReport(terms);
-  logStep(runtime2, requestId, "10", "Building signed CRE report");
+  logStep(runtime2, requestId, "11", "Building signed CRE report");
   const report2 = runtime2.report({
     encodedPayload: hexToBase64(encodedPayload),
     encoderName: "evm",
     signingAlgo: "ecdsa",
     hashingAlgo: "keccak256"
   }).result();
-  logStep(runtime2, requestId, "11", "Submitting report to UnderwritingRegistry via forwarder", {
+  logStep(runtime2, requestId, "12", "Submitting report to UnderwritingRegistry via forwarder", {
     receiver: underwritingRegistryAddress
   });
   const writeResult = evmClient.writeReport(runtime2, {
@@ -17824,20 +17889,20 @@ var onUnderwritingRequest = async (runtime2, eventLog) => {
     throw new Error(`Underwriting write failed with status=${writeResult.txStatus}`);
   }
   const txHash = bytesToHex(writeResult.txHash || new Uint8Array(32));
-  logStep(runtime2, requestId, "12", "Report submitted successfully", {
+  logStep(runtime2, requestId, "13", "Report submitted successfully", {
     txHash,
     borrower,
     assetId: assetId.toString(),
-    approved: aiOutput.approved,
-    maxLtvBps: aiOutput.maxLtvBps,
-    rateBps: aiOutput.rateBps
+    approved: finalOutput.approved,
+    maxLtvBps: finalOutput.maxLtvBps,
+    rateBps: finalOutput.rateBps
   });
   logAudit(runtime2, "underwriting_report_submitted", {
     requestId,
     borrower,
     assetId: assetId.toString(),
     txHash,
-    approved: aiOutput.approved
+    approved: finalOutput.approved
   });
   return true;
 };

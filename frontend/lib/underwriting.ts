@@ -1,4 +1,4 @@
-export type TermsTuple = [boolean, number, number, bigint, `0x${string}`];
+export type TermsTuple = [boolean, number, number, bigint, bigint, `0x${string}`];
 
 export type UnderwritingUiState =
   | "unset"
@@ -18,11 +18,12 @@ export const deriveUnderwritingState = (
   if (pendingBorrowAmount > 0n) return "pending";
   if (!terms) return "unset";
 
-  const [approved, maxLtvBps, rateBps, expiry, reasoningHash] = terms;
+  const [approved, maxLtvBps, rateBps, creditLimit, expiry, reasoningHash] = terms;
   const hasTerms =
     approved ||
     maxLtvBps > 0 ||
     rateBps > 0 ||
+    creditLimit > 0n ||
     expiry > 0n ||
     reasoningHash.toLowerCase() !== ZERO_HASH;
 

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { exec } from "child_process";
 import { promisify } from "util";
 import path from "path";
+import { DEPLOYMENTS } from "@/lib/abis";
 
 export const runtime = "nodejs"; // Needed for child_process
 const execAsync = promisify(exec);
@@ -32,8 +33,8 @@ export async function POST(request: Request) {
       ASSET_VALUE: assetValue.toString(),
       RENT_AMOUNT: rentAmount.toString(),
       ORIGINATOR: borrowerAddress,
-      NEXT_PUBLIC_RWA_ASSET_REGISTRY: process.env.NEXT_PUBLIC_RWA_ASSET_REGISTRY || "0x165fB8BCDa88B586E378C556EF582F095794858E",
-      NEXT_PUBLIC_LENDING_POOL: process.env.NEXT_PUBLIC_LENDING_POOL || "0x77b0347f171cd8782506Bd6d35EA7601EC11561c",
+      NEXT_PUBLIC_RWA_ASSET_REGISTRY: process.env.NEXT_PUBLIC_RWA_ASSET_REGISTRY || DEPLOYMENTS.rwaAssetRegistry,
+      NEXT_PUBLIC_LENDING_POOL: process.env.NEXT_PUBLIC_LENDING_POOL || DEPLOYMENTS.lendingPool,
     };
 
     console.log(`[Tokenize] Running Foundry script in ${cwd} for originator ${borrowerAddress}...`);
@@ -57,8 +58,9 @@ export async function POST(request: Request) {
         throw new Error("Failed to parse Asset ID from script output");
     }
 
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "Tokenization failed";
     console.error("[Tokenize API Error]:", error);
-    return NextResponse.json({ error: error.message || "Tokenization failed" }, { status: 500 });
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

@@ -1,0 +1,13 @@
+{
+  "name": "creditweave",
+  "version": "1.0.0",
+  "description": "Confidential AI Underwritten RWA Credit Infrastructure",
+  "scripts": {
+    "contracts:build": "cd contracts && forge build",
+    "contracts:deploy": "cd contracts && forge script script/DeployAll.s.sol --rpc-url $SEPOLIA_RPC_URL --broadcast --verify",
+    "sync-artifacts": "node scripts/sync-artifacts.js",
+    "private-apis:dev": "cd private-apis && npm run dev",
+    "frontend:dev": "cd frontend && npm run dev",
+    "cre:simulate": "cd cre && cre workflow simulate ./my-workflow -T staging-settings"
+  }
+}

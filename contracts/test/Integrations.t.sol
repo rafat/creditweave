@@ -67,7 +67,7 @@ contract IntegrationsTest is Test {
 
     function _fundAndCommit() internal {
         vm.prank(tenant);
-        usdc.transfer(agent, 1000 ether);
+        assertTrue(usdc.transfer(agent, 1000 ether));
 
         vm.prank(agent);
         usdc.approve(address(vault), 1000 ether);

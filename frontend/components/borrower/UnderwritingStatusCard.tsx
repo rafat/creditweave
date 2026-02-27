@@ -20,6 +20,13 @@ type Props = {
   errorMessage?: string;
 };
 
+interface AIExplanation {
+  summary: string;
+  keyRisks: string[];
+  confidenceLevel: "LOW" | "MEDIUM" | "HIGH";
+  riskFlags: string[];
+}
+
 export default function UnderwritingStatusCard({
   assetIdInput,
   pendingBorrowAmount,
@@ -30,6 +37,32 @@ export default function UnderwritingStatusCard({
   isError = false,
   errorMessage,
 }: Props) {
+  const [explanation, setExplanation] = useState<AIExplanation | null>(null);
+
+  const reasoningHash = terms?.[5];
+
+  useEffect(() => {
+    if (!reasoningHash || /^0x0+$/.test(reasoningHash)) {
+      setExplanation(null);
+      return;
+    }
+    const fetchExplanation = async () => {
+      try {
+        const apiUrl = process.env.NEXT_PUBLIC_PRIVATE_API_URL || "http://localhost:3001";
+        const res = await fetch(`${apiUrl}/frontend/explanations/${reasoningHash}`);
+        if (res.ok) {
+          const data = await res.json();
+          setExplanation(data.explanation || data);
+        } else {
+          setExplanation(null);
+        }
+      } catch {
+        setExplanation(null);
+      }
+    };
+    fetchExplanation();
+  }, [reasoningHash]);
+
   if (isLoading) {
     return (
       <section className="rounded-2xl border bg-[color:var(--card)] p-5">
@@ -53,36 +86,12 @@ export default function UnderwritingStatusCard({
   const approved = terms?.[0] ?? false;
   const maxLtvBps = terms?.[1] ?? 0;
   const rateBps = terms?.[2] ?? 0;
-  const expiry = terms?.[3] ?? 0n;
-  const reasoningHash = terms?.[4];
+  const creditLimit = terms?.[3] ?? 0n;
+  const expiry = terms?.[4] ?? 0n;
 
   const state = deriveUnderwritingState(pendingBorrowAmount, terms);
   const statusLabel = getStatusLabel(state);
   const riskBadge = getRiskBadge(approved, maxLtvBps);
-
-  const [explanation, setExplanation] = useState<any>(null);
-
-  useEffect(() => {
-    if (!reasoningHash || /^0x0+$/.test(reasoningHash)) {
-      setExplanation(null);
-      return;
-    }
-    const fetchExplanation = async () => {
-      try {
-        const apiUrl = process.env.NEXT_PUBLIC_PRIVATE_API_URL || "http://localhost:3001";
-        const res = await fetch(`${apiUrl}/frontend/explanations/${reasoningHash}`);
-        if (res.ok) {
-          const data = await res.json();
-          setExplanation(data);
-        } else {
-          setExplanation(null);
-        }
-      } catch (err) {
-        setExplanation(null);
-      }
-    };
-    fetchExplanation();
-  }, [reasoningHash]);
 
   const expiryDate =
     expiry > 0n ? new Date(Number(expiry) * 1000).toISOString().slice(0, 10) : "N/A";
@@ -95,13 +104,20 @@ export default function UnderwritingStatusCard({
   return (
     <section className="rounded-2xl border bg-[color:var(--card)] p-5">
       <p className="mono text-xs text-[color:var(--ink-700)]">UNDERWRITING STATUS</p>
-      <div className="mt-3 grid gap-3 md:grid-cols-3">
+      <div className="mt-3 grid gap-3 md:grid-cols-4">
         <div className="rounded-xl border p-4">
           <p className="mono text-xs text-[color:var(--ink-700)]">STATUS</p>
           <p className="mt-2 text-2xl font-semibold text-[color:var(--mint-500)]">
             {statusLabel}
           </p>
           <p className="mt-1 text-sm text-[color:var(--ink-700)]">Risk Badge: {riskBadge}</p>
+        </div>
+        <div className="rounded-xl border p-4">
+          <p className="mono text-xs text-[color:var(--ink-700)]">CREDIT LIMIT</p>
+          <p className="mt-2 text-2xl font-semibold">
+            ${Number(formatUnits(creditLimit, 18)).toLocaleString()}
+          </p>
+          <p className="mt-1 text-sm text-[color:var(--ink-700)]">Approved Amount</p>
         </div>
         <div className="rounded-xl border p-4">
           <p className="mono text-xs text-[color:var(--ink-700)]">MAX LTV</p>
@@ -125,8 +141,8 @@ export default function UnderwritingStatusCard({
       <div className="mt-4 space-y-2 text-sm">
         <p className="flex justify-between">
           <span>Pending Requested Borrow</span>
-          <span className="mono">
-            {formatUnits(pendingBorrowAmount, 18)} tokens ({pendingBorrowAmount.toString()} wei)
+          <span className="mono font-medium">
+            ${Number(formatUnits(pendingBorrowAmount, 18)).toLocaleString()}
           </span>
         </p>
         <p className="flex justify-between">

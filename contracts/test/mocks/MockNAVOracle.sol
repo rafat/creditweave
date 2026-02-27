@@ -9,8 +9,8 @@ contract MockNAVOracle {
         navs[assetId] = nav;
     }
 
-    function setIsFresh(uint256 assetId, bool isFresh) external {
-        freshStatus[assetId] = isFresh;
+    function setIsFresh(uint256 assetId, bool _isFresh) external {
+        freshStatus[assetId] = _isFresh;
     }
 
     function isFresh(uint256 assetId) external view returns (bool) {

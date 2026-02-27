@@ -175,7 +175,11 @@ abstract contract ReceiverTemplate is IReceiver, Ownable {
     for (uint256 i = 0; i < 10; i++) {
       first10[i] = hexString[i];
     }
-    s_expectedWorkflowName = bytes10(first10);
+    bytes10 workflowName;
+    assembly {
+      workflowName := mload(add(first10, 32))
+    }
+    s_expectedWorkflowName = workflowName;
     emit ExpectedWorkflowNameUpdated(previousName, s_expectedWorkflowName);
   }
 

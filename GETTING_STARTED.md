@@ -2,42 +2,46 @@
 
 This is the shortest path to run the confidential underwriting workflow end-to-end.
 
-## 1) Deploy Contracts
+## 1) Build and Deploy Contracts
 
-From `contracts/`:
+From the project root, you can use the unified scripts:
 
 ```bash
-forge script script/RedeployAll.s.sol:RedeployAll \
-  --rpc-url $SEPOLIA_RPC_URL \
+# 1. Build Solidity artifacts
+cd contracts
+forge build
+
+# Optional Testing
+forge test -vv
+
+# 2. Deploy to Sepolia (requires env vars: SEPOLIA_RPC_URL, PRIVATE_KEY)
+source.env
+forge script script/DeployAll.s.sol \                                     
+  --rpc-url sepolia \
   --private-key $PRIVATE_KEY \
-  --broadcast
+  --broadcast \
+  --verify \
+  --chain-id 11155111 \
+  -vvvv
 ```
 
-This deploys:
-- `MockERC20`
-- `RWAAssetRegistry`
-- `RentalCashFlowLogic`
-- `RWARevenueVault`
-- `InvestorShareToken`
-- `UnderwritingRegistry`
-- `NAVOracle`
-- `RWALendingPool`
+## 2) Sync Artifacts
 
-## 2) Update CRE Addresses
+Sync the deployment addresses and ABIs across the `frontend` and `cre` folders:
 
-Set these in both:
-- `cre/my-workflow/config.staging.json`
-- `cre/my-workflow/config.production.json`
+```bash
+# Move back to the root folder
+cd ../
+npm run sync-artifacts
+```
 
-Required:
-- `underwritingRegistryAddress`
-- `navOracleAddress`
-- `lendingPoolAddress`
-- `rwaAssetRegistryAddress`
+This automatically generates typed constants in both directories, so you don't need to manually update addresses.
 
 ## 3) Start Private APIs
 
 From `private-apis/`:
+
+Copy .env.example to .env
 
 ```bash
 npm install
@@ -54,10 +58,9 @@ curl http://localhost:3001/health
 
 `cre/secrets.yaml` maps runtime secret IDs to env keys. Keep these env vars set:
 
-- `GEMINI_API_KEY_ALL`
-- `CRE_API_KEY_ALL`
-- `WORKFLOW_OWNER_PRIVATE_KEY_ALL`
-- `CRE_ETH_PRIVATE_KEY`
+- `GEMINI_API_KEY`
+- `CRE_API_KEY`
+- `WORKFLOW_OWNER_PRIVATE_KEY`
 
 ## 5) Typecheck Workflow
 
@@ -69,7 +72,7 @@ bun x tsc --noEmit
 
 ## 6) Trigger Underwriting Request
 
-Current contract call:
+Current contract call (Note: the event now includes a **nonce** for security):
 
 ```bash
 cast send $UNDERWRITING_REGISTRY_ADDRESS \
@@ -83,7 +86,7 @@ cast send $UNDERWRITING_REGISTRY_ADDRESS \
 Event emitted:
 
 ```solidity
-UnderwritingRequested(address borrower, uint256 assetId, uint256 intendedBorrowAmount)
+UnderwritingRequested(address borrower, uint256 assetId, uint256 intendedBorrowAmount, uint64 nonce)
 ```
 
 ## 7) Run CRE Simulation for That Event

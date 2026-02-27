@@ -18,7 +18,7 @@ contract MockCashFlowLogic is ICashFlowLogic {
 
     function initialize(bytes calldata) external override {}
 
-    function getAssetStatus() external view override returns (RWACommonTypes.AssetStatus) {
+    function getAssetStatus() external pure override returns (RWACommonTypes.AssetStatus) {
         return RWACommonTypes.AssetStatus.ACTIVE;
     }
 

@@ -37,6 +37,14 @@ contract TokenizeAsset is Script {
         
         // Ensure originator is whitelisted so they can receive and transfer tokens
         registry.whitelistRecipient(originator);
+        
+        // Ensure the Lending Pool is authorized to receive and hold tokens as collateral
+        if (!registry.kycVerified(lendingPoolAddress)) {
+            registry.verifyKYC(lendingPoolAddress);
+        }
+        if (!registry.isWhitelisted(lendingPoolAddress)) {
+            registry.whitelistRecipient(lendingPoolAddress);
+        }
 
         // 2. Register Asset (Requires ASSET_FACTORY_ROLE)
         uint256 assetId = registry.registerAsset(

@@ -37,8 +37,8 @@ export default function AssetSelector({ selectedAssetId, onSelect }: Props) {
       try {
         setIsLoading(true);
         const latestBlock = await publicClient.getBlockNumber();
-        // Query last 50,000 blocks for efficiency
-        const fromBlock = latestBlock > 50000n ? latestBlock - 50000n : 0n;
+        // Query last 40,000 blocks for efficiency (staying under the common 50,000 limit)
+        const fromBlock = latestBlock > 40000n ? latestBlock - 40000n : 0n;
 
         const logs = await publicClient.getLogs({
           address: contracts.rwaAssetRegistry,
@@ -57,14 +57,14 @@ export default function AssetSelector({ selectedAssetId, onSelect }: Props) {
               abi: RWA_ASSET_REGISTRY_ABI,
               functionName: "getAssetCore",
               args: [id],
-            }) as any;
+            }) as [bigint, number, `0x${string}`, number, bigint, bigint];
 
             const metadata = await publicClient.readContract({
               address: contracts.rwaAssetRegistry,
               abi: RWA_ASSET_REGISTRY_ABI,
               functionName: "getAssetMetadata",
               args: [id],
-            }) as any;
+            }) as [string, bigint, bigint, `0x${string}`];
 
             return {
               assetId: id,
@@ -89,7 +89,7 @@ export default function AssetSelector({ selectedAssetId, onSelect }: Props) {
     };
 
     fetchAssets();
-  }, [address, publicClient, contracts.rwaAssetRegistry]);
+  }, [address, publicClient, contracts.rwaAssetRegistry, onSelect, selectedAssetId]);
 
   if (isLoading) {
     return (

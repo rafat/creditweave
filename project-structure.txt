@@ -1,17 +1,27 @@
 .
+├── ARCHITECTURE.md
 ├── contracts
 │   ├── broadcast
-│   │   └── DeployAll.s.sol
+│   │   ├── DeployAll.s.sol
+│   │   │   └── 11155111
+│   │   │       ├── run-1771498597303.json
+│   │   │       ├── run-1771656444572.json
+│   │   │       └── run-latest.json
+│   │   └── TokenizeAsset.s.sol
 │   │       └── 11155111
-│   │           ├── run-1771498597303.json
+│   │           ├── run-1771842303606.json
 │   │           └── run-latest.json
 │   ├── cache
 │   │   ├── DeployAll.s.sol
 │   │   │   └── 11155111
 │   │   │       ├── run-1771498597303.json
+│   │   │       ├── run-1771656444572.json
 │   │   │       └── run-latest.json
 │   │   ├── solidity-files-cache.json
-│   │   └── test-failures
+│   │   └── TokenizeAsset.s.sol
+│   │       └── 11155111
+│   │           ├── run-1771842303606.json
+│   │           └── run-latest.json
 │   ├── deployments.txt
 │   ├── foundry.lock
 │   ├── foundry.toml
@@ -581,7 +591,8 @@
 │   │   ├── DeployAll.s.sol
 │   │   ├── DeployCreditWeave.s.sol
 │   │   ├── DeployRWAContracts.s.sol
-│   │   └── SeedLiquidity.s.sol
+│   │   ├── SeedLiquidity.s.sol
+│   │   └── TokenizeAsset.s.sol
 │   ├── src
 │   │   ├── interface
 │   │   │   ├── ICashFlowLogic.sol
@@ -615,6 +626,7 @@
 │       ├── RWARevenueVault.t.sol
 │       └── UnderwritingRegistry.t.sol
 ├── cre
+│   ├── cre
 │   ├── my-workflow
 │   │   ├── bun.lock
 │   │   ├── config.production.json
@@ -622,17 +634,61 @@
 │   │   ├── main.ts
 │   │   ├── package.json
 │   │   ├── README.md
+│   │   ├── tmp.js
+│   │   ├── tmp.wasm
 │   │   ├── tsconfig.json
 │   │   └── workflow.yaml
 │   ├── project.yaml
 │   └── secrets.yaml
 ├── frontend
 │   ├── app
+│   │   ├── admin
+│   │   │   └── page.tsx
+│   │   ├── api
+│   │   │   └── rpc
+│   │   │       ├── route.ts
+│   │   │       └── tokenize
+│   │   │           └── route.ts
+│   │   ├── borrower
+│   │   │   ├── page.tsx
+│   │   │   └── tokenize
+│   │   │       └── page.tsx
 │   │   ├── favicon.ico
 │   │   ├── globals.css
+│   │   ├── investor
+│   │   │   └── page.tsx
 │   │   ├── layout.tsx
-│   │   └── page.tsx
+│   │   ├── page.tsx
+│   │   └── providers.tsx
+│   ├── components
+│   │   ├── admin
+│   │   │   ├── AdminDashboard.tsx
+│   │   │   └── SystemHealth.tsx
+│   │   ├── AppNav.tsx
+│   │   ├── borrower
+│   │   │   ├── AssetSelector.tsx
+│   │   │   ├── BorrowerDashboard.tsx
+│   │   │   ├── BorrowForm.tsx
+│   │   │   ├── CreSimulationCard.tsx
+│   │   │   ├── TokenizationWizard.tsx
+│   │   │   ├── UnderwritingRequestForm.tsx
+│   │   │   └── UnderwritingStatusCard.tsx
+│   │   ├── investor
+│   │   │   ├── AssetOverview.tsx
+│   │   │   ├── InvestorDashboard.tsx
+│   │   │   ├── PoolOverview.tsx
+│   │   │   └── RecentUnderwritingOutcomes.tsx
+│   │   ├── NetworkGuard.tsx
+│   │   ├── TxStatusInline.tsx
+│   │   ├── TxToast.tsx
+│   │   └── WalletBar.tsx
 │   ├── eslint.config.mjs
+│   ├── lib
+│   │   ├── contracts.ts
+│   │   ├── env.ts
+│   │   ├── tx.ts
+│   │   ├── underwriting.ts
+│   │   └── wagmi.ts
 │   ├── next-env.d.ts
 │   ├── next.config.ts
 │   ├── package-lock.json
@@ -645,7 +701,16 @@
 │   │   ├── vercel.svg
 │   │   └── window.svg
 │   ├── README.md
+│   ├── tsconfig.json
+│   └── tsconfig.tsbuildinfo
+├── GETTING_STARTED.md
+├── PHASE2_IMPLEMENTATION.md
+├── private-apis
+│   ├── package-lock.json
+│   ├── package.json
+│   ├── src
+│   │   └── server.ts
 │   └── tsconfig.json
 └── project-structure.txt
 
-132 directories, 517 files
+150 directories, 564 files

@@ -26,7 +26,7 @@ const toBigInt = (value: string): bigint | null => {
 };
 
 const UNDERWRITING_REQUESTED_EVENT = parseAbiItem(
-  "event UnderwritingRequested(address indexed borrower, uint256 indexed assetId, uint256 intendedBorrowAmount)",
+  "event UnderwritingRequested(address indexed borrower, uint256 indexed assetId, uint256 intendedBorrowAmount, uint64 nonce)",
 );
 
 import AssetSelector from "./AssetSelector";
@@ -37,7 +37,7 @@ export default function BorrowerDashboard() {
   const publicClient = usePublicClient({ chainId: SUPPORTED_CHAIN_ID });
 
   const [assetIdInput, setAssetIdInput] = useState("");
-  const [intendedBorrowInput, setIntendedBorrowInput] = useState("500000");
+  const [intendedBorrowInput, setIntendedBorrowInput] = useState("100,000");
   const [tx, setTx] = useState<TxState>({ phase: "idle" });
   const [underwritingTxHash, setUnderwritingTxHash] = useState<`0x${string}` | undefined>(undefined);
   const [underwritingEventIndex, setUnderwritingEventIndex] = useState<number | null>(null);
@@ -131,7 +131,7 @@ export default function BorrowerDashboard() {
   useEffect(() => {
     if (!underwritingTxHash || !underwritingReceipt.data) return;
 
-    const eventTopic = keccak256(toHex("UnderwritingRequested(address,uint256,uint256)"));
+    const eventTopic = keccak256(toHex("UnderwritingRequested(address,uint256,uint256,uint64)"));
     const targetAddress = contracts.underwritingRegistry.toLowerCase();
 
     const targetLogPosition = underwritingReceipt.data.logs.findIndex((log) => {
@@ -264,7 +264,7 @@ export default function BorrowerDashboard() {
                       assetIdInput={assetIdInput}
                       pendingBorrowAmount={pendingBorrowAmount}
                       terms={terms}
-                      nav={navRead.data ? (navRead.data as any)[0] : 0n}
+                      nav={navRead.data ? (navRead.data as [bigint, bigint, `0x${string}`])[0] : 0n}
                       registryAddress={contracts.underwritingRegistry}
                       isLoading={statusLoading}
                       isError={statusError}

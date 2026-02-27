@@ -8,17 +8,21 @@ contract UnderwritingRegistry is ReceiverTemplate {
         bool approved;
         uint16 maxLtvBps;
         uint16 rateBps;
+        uint256 creditLimit;
         uint256 expiry;
         bytes32 reasoningHash;
     }
 
     mapping(address => mapping(uint256 => UnderwritingTerms)) public terms;
     mapping(address => mapping(uint256 => uint256)) public requestedBorrowAmount;
+    mapping(address => mapping(uint256 => uint64)) public requestNonce;
+    mapping(address => mapping(uint256 => bool)) public underwritingPending;
 
     event UnderwritingRequested(
         address indexed borrower,
         uint256 indexed assetId,
-        uint256 intendedBorrowAmount
+        uint256 intendedBorrowAmount,
+        uint64 nonce
     );
 
     event UnderwritingUpdated(
@@ -44,8 +48,10 @@ contract UnderwritingRegistry is ReceiverTemplate {
     }
 
     function requestUnderwriting(uint256 assetId, uint256 intendedBorrowAmount) public {
+        uint64 nonce = ++requestNonce[msg.sender][assetId];
         requestedBorrowAmount[msg.sender][assetId] = intendedBorrowAmount;
-        emit UnderwritingRequested(msg.sender, assetId, intendedBorrowAmount);
+        underwritingPending[msg.sender][assetId] = true;
+        emit UnderwritingRequested(msg.sender, assetId, intendedBorrowAmount, nonce);
     }
 
     // ------------------------------------------------------------
@@ -56,37 +62,51 @@ contract UnderwritingRegistry is ReceiverTemplate {
         (
             address borrower,
             uint256 assetId,
-            bool approved,
-            uint16 maxLtvBps,
-            uint16 rateBps,
-            uint256 expiry,
-            bytes32 reasoningHash
-        ) = abi.decode(
-            report,
-            (address, uint256, bool, uint16, uint16, uint256, bytes32)
-        );
+            uint64 nonce,
+            UnderwritingTerms memory t
+        ) = _decodeReport(report);
 
         require(borrower != address(0), "Invalid borrower");
-        require(maxLtvBps <= 10_000, "Invalid LTV");
-        require(expiry > block.timestamp, "Invalid expiry");
+        require(t.maxLtvBps <= 10_000, "Invalid LTV");
+        require(t.expiry > block.timestamp, "Invalid expiry");
+        require(underwritingPending[borrower][assetId], "No pending request");
+        require(nonce == requestNonce[borrower][assetId], "Bad nonce");
 
-        terms[borrower][assetId] = UnderwritingTerms({
-            approved: approved,
-            maxLtvBps: maxLtvBps,
-            rateBps: rateBps,
-            expiry: expiry,
-            reasoningHash: reasoningHash
-        });
+        terms[borrower][assetId] = t;
+
         delete requestedBorrowAmount[borrower][assetId];
+        delete underwritingPending[borrower][assetId];
 
         emit UnderwritingUpdated(
             borrower,
             assetId,
-            approved,
-            maxLtvBps,
-            rateBps,
-            expiry,
-            reasoningHash
+            t.approved,
+            t.maxLtvBps,
+            t.rateBps,
+            t.expiry,
+            t.reasoningHash
+        );
+    }
+
+    function _decodeReport(bytes calldata report) internal pure returns (
+        address borrower,
+        uint256 assetId,
+        uint64 nonce,
+        UnderwritingTerms memory t
+    ) {
+        (
+            borrower,
+            assetId,
+            nonce,
+            t.approved,
+            t.maxLtvBps,
+            t.rateBps,
+            t.creditLimit,
+            t.expiry,
+            t.reasoningHash
+        ) = abi.decode(
+            report,
+            (address, uint256, uint64, bool, uint16, uint16, uint256, uint256, bytes32)
         );
     }
 
@@ -97,10 +117,10 @@ contract UnderwritingRegistry is ReceiverTemplate {
     function getTerms(address borrower, uint256 assetId)
         external
         view
-        returns (bool, uint16, uint16, uint256, bytes32)
+        returns (bool, uint16, uint16, uint256, uint256, bytes32)
     {
         UnderwritingTerms storage t = terms[borrower][assetId];
-        return (t.approved, t.maxLtvBps, t.rateBps, t.expiry, t.reasoningHash);
+        return (t.approved, t.maxLtvBps, t.rateBps, t.creditLimit, t.expiry, t.reasoningHash);
     }
 
     function isApproved(address borrower, uint256 assetId)

@@ -15,12 +15,34 @@ contract UnderwritingRegistryTest is Test {
     event UnderwritingRequested(
         address indexed borrower,
         uint256 indexed assetId,
-        uint256 intendedBorrowAmount
+        uint256 intendedBorrowAmount,
+        uint64 nonce
     );
 
     function setUp() public {
         forwarder = new MockForwarder();
         registry = new UnderwritingRegistry(address(forwarder));
+    }
+
+    function _buildReport(
+        bool approved,
+        uint16 maxLtvBps,
+        uint16 rateBps,
+        uint256 creditLimit,
+        uint256 expiry,
+        bytes32 reasoningHash
+    ) internal view returns (bytes memory) {
+        return abi.encode(
+            borrower,
+            assetId,
+            uint64(1),
+            approved,
+            maxLtvBps,
+            rateBps,
+            creditLimit,
+            expiry,
+            reasoningHash
+        );
     }
 
     // ------------------------------------------------------------
@@ -29,7 +51,7 @@ contract UnderwritingRegistryTest is Test {
 
     function testRequestUnderwritingEmitsEvent() public {
         vm.expectEmit(true, true, false, true);
-        emit UnderwritingRequested(address(this), assetId, 5000);
+        emit UnderwritingRequested(address(this), assetId, 5000, 1);
 
         registry.requestUnderwriting(assetId, 5000);
     }
@@ -45,12 +67,11 @@ contract UnderwritingRegistryTest is Test {
     // ------------------------------------------------------------
 
     function testOnReportFailsIfNotForwarder() public {
-        bytes memory report = abi.encode(
-            borrower,
-            assetId,
+        bytes memory report = _buildReport(
             true,
             uint16(6000),
             uint16(900),
+            uint256(100_000 ether),
             block.timestamp + 1 days,
             keccak256("reason")
         );
@@ -67,23 +88,28 @@ contract UnderwritingRegistryTest is Test {
         vm.prank(borrower);
         registry.requestUnderwriting(assetId, 7_500);
 
-        bytes memory report = abi.encode(
-            borrower,
-            assetId,
+        bytes memory report = _buildReport(
             true,
             uint16(6000),
             uint16(900),
+            uint256(100_000 ether),
             block.timestamp + 1 days,
             keccak256("reason")
         );
 
         forwarder.deliver(address(registry), "", report);
 
-        (bool approved, uint16 maxLtvBps, uint16 rateBps, uint256 expiry, bytes32 reasoningHash) = registry.getTerms(borrower, assetId);
+        (bool approved,,,,,) = registry.getTerms(borrower, assetId);
+        (,uint16 maxLtvBps,,,,) = registry.getTerms(borrower, assetId);
+        (,,uint16 rateBps,,,) = registry.getTerms(borrower, assetId);
+        (,,,uint256 creditLimit,,) = registry.getTerms(borrower, assetId);
+        (,,,,uint256 expiry,) = registry.getTerms(borrower, assetId);
+        (,,,,,bytes32 reasoningHash) = registry.getTerms(borrower, assetId);
 
         assertTrue(approved);
         assertEq(maxLtvBps, 6000);
         assertEq(rateBps, 900);
+        assertEq(creditLimit, 100_000 ether);
         assertGt(expiry, block.timestamp);
         assertEq(reasoningHash, keccak256("reason"));
         assertEq(registry.getRequestedBorrowAmount(borrower, assetId), 0);
@@ -95,12 +121,14 @@ contract UnderwritingRegistryTest is Test {
     // ------------------------------------------------------------
 
     function testRejectExpiredReport() public {
-        bytes memory report = abi.encode(
-            borrower,
-            assetId,
+        vm.prank(borrower);
+        registry.requestUnderwriting(assetId, 7_500);
+
+        bytes memory report = _buildReport(
             true,
             uint16(6000),
             uint16(900),
+            uint256(100_000 ether),
             block.timestamp - 1,
             keccak256("reason")
         );
@@ -114,12 +142,14 @@ contract UnderwritingRegistryTest is Test {
     // ------------------------------------------------------------
 
     function testRejectInvalidLTV() public {
-        bytes memory report = abi.encode(
-            borrower,
-            assetId,
+        vm.prank(borrower);
+        registry.requestUnderwriting(assetId, 7_500);
+
+        bytes memory report = _buildReport(
             true,
             uint16(15000),
             uint16(900),
+            uint256(100_000 ether),
             block.timestamp + 1 days,
             keccak256("reason")
         );
@@ -133,12 +163,14 @@ contract UnderwritingRegistryTest is Test {
     // ------------------------------------------------------------
 
     function testIsApprovedTrue() public {
-        bytes memory report = abi.encode(
-            borrower,
-            assetId,
+        vm.prank(borrower);
+        registry.requestUnderwriting(assetId, 7_500);
+
+        bytes memory report = _buildReport(
             true,
             uint16(6000),
             uint16(900),
+            uint256(100_000 ether),
             block.timestamp + 1 days,
             keccak256("reason")
         );
@@ -150,12 +182,14 @@ contract UnderwritingRegistryTest is Test {
     }
 
     function testIsApprovedFalseIfExpired() public {
-        bytes memory report = abi.encode(
-            borrower,
-            assetId,
+        vm.prank(borrower);
+        registry.requestUnderwriting(assetId, 7_500);
+
+        bytes memory report = _buildReport(
             true,
             uint16(6000),
             uint16(900),
+            uint256(100_000 ether),
             block.timestamp + 1,
             keccak256("reason")
         );
@@ -169,12 +203,14 @@ contract UnderwritingRegistryTest is Test {
     }
 
     function testIsApprovedFalseIfDenied() public {
-        bytes memory report = abi.encode(
-            borrower,
-            assetId,
+        vm.prank(borrower);
+        registry.requestUnderwriting(assetId, 7_500);
+
+        bytes memory report = _buildReport(
             false,
             uint16(6000),
             uint16(900),
+            uint256(100_000 ether),
             block.timestamp + 1 days,
             keccak256("reason")
         );

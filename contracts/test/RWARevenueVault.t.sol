@@ -87,7 +87,7 @@ contract RWARevenueVaultTest is Test {
 
     function testDepositsRevenueIntoIdleBalance() public {
         vm.prank(owner);
-        paymentToken.transfer(agent, 1000);
+        assertTrue(paymentToken.transfer(agent, 1000));
 
         vm.prank(agent);
         paymentToken.approve(address(vault), 1000);
@@ -103,7 +103,7 @@ contract RWARevenueVaultTest is Test {
         vault.mintShares(investor1, 100);
 
         vm.prank(owner);
-        paymentToken.transfer(agent, 1000 ether);
+        assertTrue(paymentToken.transfer(agent, 1000 ether));
 
         vm.prank(agent);
         paymentToken.approve(address(vault), 1000 ether);
@@ -130,7 +130,7 @@ contract RWARevenueVaultTest is Test {
         vault.mintShares(investor1, 100);
 
         vm.prank(owner);
-        paymentToken.transfer(agent, 1000 ether);
+        assertTrue(paymentToken.transfer(agent, 1000 ether));
 
         vm.prank(agent);
         paymentToken.approve(address(vault), 1000 ether);
@@ -156,7 +156,7 @@ contract RWARevenueVaultTest is Test {
         vault.mintShares(investor1, 100);
 
         vm.prank(owner);
-        paymentToken.transfer(agent, 1000 ether);
+        assertTrue(paymentToken.transfer(agent, 1000 ether));
 
         vm.prank(agent);
         paymentToken.approve(address(vault), 1000 ether);

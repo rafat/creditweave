@@ -1,5 +1,12 @@
 import type { Address } from "viem";
-import { safeAddress } from "@/lib/env";
+import { 
+  DEPLOYMENTS, 
+  UNDERWRITINGREGISTRY_ABI as GENERATED_UNDERWRITING_REGISTRY_ABI,
+  NAVORACLE_ABI as GENERATED_NAV_ORACLE_ABI,
+  RWALENDINGPOOL_ABI as GENERATED_LENDING_POOL_ABI,
+  RWAASSETREGISTRY_ABI as GENERATED_RWA_ASSET_REGISTRY_ABI,
+  MOCKERC20_ABI as GENERATED_ERC20_ABI
+} from "./abis";
 
 type ContractsByChain = {
   underwritingRegistry: Address;
@@ -8,237 +15,19 @@ type ContractsByChain = {
   rwaAssetRegistry: Address;
 };
 
+// Use the generated deployments as the source of truth
 export const CONTRACTS: Record<number, ContractsByChain> = {
   11155111: {
-    underwritingRegistry: safeAddress(
-      process.env.NEXT_PUBLIC_UNDERWRITING_REGISTRY,
-      "0x96c43232dd776e651ba164488232e2bde10c21ad",
-      "NEXT_PUBLIC_UNDERWRITING_REGISTRY",
-    ),
-    navOracle: safeAddress(
-      process.env.NEXT_PUBLIC_NAV_ORACLE,
-      "0x28d62f419b3f221f2e749bda7dd92b64f123538e",
-      "NEXT_PUBLIC_NAV_ORACLE",
-    ),
-    lendingPool: safeAddress(
-      process.env.NEXT_PUBLIC_LENDING_POOL,
-      "0x77b0347f171cd8782506bd6d35ea7601ec11561c",
-      "NEXT_PUBLIC_LENDING_POOL",
-    ),
-    rwaAssetRegistry: safeAddress(
-      process.env.NEXT_PUBLIC_RWA_ASSET_REGISTRY,
-      "0x165fb8bcda88b586e378c556ef582f095794858e",
-      "NEXT_PUBLIC_RWA_ASSET_REGISTRY",
-    ),
+    underwritingRegistry: (process.env.NEXT_PUBLIC_UNDERWRITING_REGISTRY as Address) || DEPLOYMENTS.underwritingRegistry,
+    navOracle: (process.env.NEXT_PUBLIC_NAV_ORACLE as Address) || DEPLOYMENTS.navOracle,
+    lendingPool: (process.env.NEXT_PUBLIC_LENDING_POOL as Address) || DEPLOYMENTS.lendingPool,
+    rwaAssetRegistry: (process.env.NEXT_PUBLIC_RWA_ASSET_REGISTRY as Address) || DEPLOYMENTS.rwaAssetRegistry,
   },
 };
 
-export const UNDERWRITING_REGISTRY_ABI = [
-  {
-    type: "function",
-    stateMutability: "nonpayable",
-    name: "requestUnderwriting",
-    inputs: [
-      { name: "assetId", type: "uint256" },
-      { name: "intendedBorrowAmount", type: "uint256" },
-    ],
-    outputs: [],
-  },
-  {
-    type: "function",
-    stateMutability: "view",
-    name: "getRequestedBorrowAmount",
-    inputs: [
-      { name: "borrower", type: "address" },
-      { name: "assetId", type: "uint256" },
-    ],
-    outputs: [{ name: "", type: "uint256" }],
-  },
-  {
-    type: "function",
-    stateMutability: "view",
-    name: "getTerms",
-    inputs: [
-      { name: "borrower", type: "address" },
-      { name: "assetId", type: "uint256" },
-    ],
-    outputs: [
-      { name: "approved", type: "bool" },
-      { name: "maxLtvBps", type: "uint16" },
-      { name: "rateBps", type: "uint16" },
-      { name: "expiry", type: "uint256" },
-      { name: "reasoningHash", type: "bytes32" },
-    ],
-  },
-] as const;
+export const UNDERWRITING_REGISTRY_ABI = GENERATED_UNDERWRITING_REGISTRY_ABI;
+export const LENDING_POOL_ABI = GENERATED_LENDING_POOL_ABI;
+export const ERC20_ABI = GENERATED_ERC20_ABI;
+export const RWA_ASSET_REGISTRY_ABI = GENERATED_RWA_ASSET_REGISTRY_ABI;
+export const NAV_ORACLE_ABI = GENERATED_NAV_ORACLE_ABI;
 
-export const LENDING_POOL_ABI = [
-  {
-    type: "function",
-    stateMutability: "view",
-    name: "stablecoin",
-    inputs: [],
-    outputs: [{ name: "", type: "address" }],
-  },
-  {
-    type: "function",
-    stateMutability: "nonpayable",
-    name: "depositCollateral",
-    inputs: [
-      { name: "assetId", type: "uint256" },
-      { name: "amount", type: "uint256" },
-    ],
-    outputs: [],
-  },
-  {
-    type: "function",
-    stateMutability: "nonpayable",
-    name: "borrow",
-    inputs: [
-      { name: "assetId", type: "uint256" },
-      { name: "amount", type: "uint256" },
-    ],
-    outputs: [],
-  },
-  {
-    type: "function",
-    stateMutability: "nonpayable",
-    name: "setAssetToken",
-    inputs: [
-      { name: "assetId", type: "uint256" },
-      { name: "token", type: "address" },
-    ],
-    outputs: [],
-  },
-  {
-    type: "function",
-    stateMutability: "nonpayable",
-    name: "setAssetLogic",
-    inputs: [
-      { name: "assetId", type: "uint256" },
-      { name: "logic", type: "address" },
-    ],
-    outputs: [],
-  },
-  {
-    type: "function",
-    stateMutability: "view",
-    name: "collateral",
-    inputs: [
-      { name: "user", type: "address" },
-      { name: "assetId", type: "uint256" },
-    ],
-    outputs: [{ name: "", type: "uint256" }],
-  },
-  {
-    type: "function",
-    stateMutability: "view",
-    name: "debt",
-    inputs: [
-      { name: "user", type: "address" },
-      { name: "assetId", type: "uint256" },
-    ],
-    outputs: [
-      { name: "principal", type: "uint256" },
-      { name: "lastAccrued", type: "uint256" },
-    ],
-  },
-] as const;
-
-export const ERC20_ABI = [
-  {
-    type: "function",
-    stateMutability: "view",
-    name: "balanceOf",
-    inputs: [{ name: "account", type: "address" }],
-    outputs: [{ name: "", type: "uint256" }],
-  },
-] as const;
-
-export const RWA_ASSET_REGISTRY_ABI = [
-  {
-    type: "function",
-    stateMutability: "nonpayable",
-    name: "registerAsset",
-    inputs: [
-      { name: "_assetType", type: "uint8" },
-      { name: "_originator", type: "address" },
-      { name: "_assetValue", type: "uint256" },
-      { name: "_ipfsMetadataHash", type: "string" },
-    ],
-    outputs: [{ name: "assetId", type: "uint256" }],
-  },
-  {
-    type: "function",
-    stateMutability: "nonpayable",
-    name: "linkContracts",
-    inputs: [
-      { name: "_assetId", type: "uint256" },
-      { name: "_logicContract", type: "address" },
-      { name: "_vaultContract", type: "address" },
-      { name: "_token", type: "address" },
-    ],
-    outputs: [],
-  },
-  {
-    type: "function",
-    stateMutability: "nonpayable",
-    name: "activateAsset",
-    inputs: [{ name: "_assetId", type: "uint256" }],
-    outputs: [],
-  },
-  {
-    type: "function",
-    stateMutability: "nonpayable",
-    name: "verifyKYC",
-    inputs: [{ name: "_address", type: "address" }],
-    outputs: [],
-  },
-  {
-    type: "function",
-    stateMutability: "view",
-    name: "getAssetCore",
-    inputs: [{ name: "assetId", type: "uint256" }],
-    outputs: [
-      { name: "assetId", type: "uint256" },
-      { name: "assetType", type: "uint8" },
-      { name: "originator", type: "address" },
-      { name: "currentStatus", type: "uint8" },
-      { name: "assetValue", type: "uint256" },
-      { name: "accumulatedYield", type: "uint256" },
-    ],
-  },
-  {
-    type: "function",
-    stateMutability: "view",
-    name: "getAssetMetadata",
-    inputs: [{ name: "assetId", type: "uint256" }],
-    outputs: [
-      { name: "ipfsMetadataHash", type: "string" },
-      { name: "registrationDate", type: "uint256" },
-      { name: "activationDate", type: "uint256" },
-      { name: "valuationOracle", type: "address" },
-    ],
-  },
-] as const;
-
-export const NAV_ORACLE_ABI = [
-  {
-    type: "function",
-    stateMutability: "view",
-    name: "isFresh",
-    inputs: [{ name: "assetId", type: "uint256" }],
-    outputs: [{ name: "", type: "bool" }],
-  },
-  {
-    type: "function",
-    stateMutability: "view",
-    name: "getNAVData",
-    inputs: [{ name: "assetId", type: "uint256" }],
-    outputs: [
-      { name: "nav", type: "uint256" },
-      { name: "updatedAt", type: "uint256" },
-      { name: "sourceHash", type: "bytes32" },
-    ],
-  },
-] as const;
