@@ -418,6 +418,12 @@ contract RWALendingPool is ReentrancyGuard, Ownable {
         return position.principal + interest;
     }
 
+    function getDebtWithAccrual(address user, uint256 assetId)
+        external view returns (uint256)
+    {
+        return _debtWithAccrual(user, assetId);
+    }
+
 
 
     // ============================================================

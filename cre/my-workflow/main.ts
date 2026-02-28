@@ -273,7 +273,6 @@ const fetchJsonWithConfidentialHttp = (
                 Object.entries(requestHeaders).map(([key, value]) => [key, { values: [value] }]),
               ),
             },
-            timeout: 30000,
           })
           .result();
 
@@ -314,7 +313,6 @@ const postJsonWithConfidentialHttp = (
               ) as any,
               bodyString: requestBody,
             },
-            timeout: 30000,
           })
           .result();
 

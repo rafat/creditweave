@@ -24,11 +24,16 @@ const ASSET_REGISTERED_EVENT = parseAbiItem(
 );
 
 export default function AssetSelector({ selectedAssetId, onSelect }: Props) {
+  const [mounted, setMounted] = useState(false);
   const { address } = useAccount();
   const publicClient = usePublicClient({ chainId: SUPPORTED_CHAIN_ID });
   const [assets, setAssets] = useState<AssetInfo[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const contracts = CONTRACTS[SUPPORTED_CHAIN_ID];
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     if (!address || !publicClient) return;
@@ -90,6 +95,8 @@ export default function AssetSelector({ selectedAssetId, onSelect }: Props) {
 
     fetchAssets();
   }, [address, publicClient, contracts.rwaAssetRegistry, onSelect, selectedAssetId]);
+
+  if (!mounted) return null;
 
   if (isLoading) {
     return (

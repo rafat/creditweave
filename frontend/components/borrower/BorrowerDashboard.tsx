@@ -32,9 +32,14 @@ const UNDERWRITING_REQUESTED_EVENT = parseAbiItem(
 import AssetSelector from "./AssetSelector";
 
 export default function BorrowerDashboard() {
+  const [mounted, setMounted] = useState(false);
   const { address } = useAccount();
   const currentChainId = useChainId();
   const publicClient = usePublicClient({ chainId: SUPPORTED_CHAIN_ID });
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   const [assetIdInput, setAssetIdInput] = useState("");
   const [intendedBorrowInput, setIntendedBorrowInput] = useState("100,000");
@@ -235,6 +240,8 @@ export default function BorrowerDashboard() {
     setUnderwritingEventIndex(null);
   }, [latestOnchainRequest, pendingBorrowAmount, underwritingTxHash]);
 
+  if (!mounted) return null;
+
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-6xl flex-col gap-6 px-4 py-8 md:px-8">
       <AppNav />
@@ -259,25 +266,40 @@ export default function BorrowerDashboard() {
           onSelect={setAssetIdInput}
         />
 
-        <div className="grid gap-4 md:grid-cols-2">
-                    <UnderwritingStatusCard
-                      assetIdInput={assetIdInput}
-                      pendingBorrowAmount={pendingBorrowAmount}
-                      terms={terms}
-                      nav={navRead.data ? (navRead.data as [bigint, bigint, `0x${string}`])[0] : 0n}
-                      registryAddress={contracts.underwritingRegistry}
-                      isLoading={statusLoading}
-                      isError={statusError}
-                      errorMessage={statusErrorMessage}
-                    />            <article className="rounded-2xl border bg-[color:var(--card)] p-5">
+        <div className="grid gap-4 md:grid-cols-3">
+          <div className="md:col-span-2">
+            <UnderwritingStatusCard
+              assetIdInput={assetIdInput}
+              pendingBorrowAmount={pendingBorrowAmount}
+              terms={terms}
+              nav={navRead.data ? (navRead.data as [bigint, bigint, `0x${string}`])[0] : 0n}
+              registryAddress={contracts.underwritingRegistry}
+              isLoading={statusLoading}
+              isError={statusError}
+              errorMessage={statusErrorMessage}
+            />
+          </div>
+          <article className="rounded-2xl border bg-[color:var(--card)] p-5 flex flex-col h-full">
             <p className="mono text-xs text-[color:var(--ink-700)]">CONFIDENTIALITY GUARANTEE</p>
-            <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
-                <span className="rounded-lg bg-[color:var(--mint-100)] px-3 py-2">Income data: offchain</span>
-                <span className="rounded-lg bg-[color:var(--mint-100)] px-3 py-2">Credit data: offchain</span>
-                <span className="rounded-lg bg-[color:var(--mint-100)] px-3 py-2">KYC/AML: offchain</span>
-                <span className="rounded-lg bg-[color:var(--mint-100)] px-3 py-2">AI reasoning: hashed</span>
+            <div className="mt-4 flex flex-col gap-3 text-sm flex-grow justify-center">
+              <span className="rounded-lg bg-[color:var(--mint-100)] px-4 py-3 flex items-center gap-2 font-medium">
+                <svg className="w-4 h-4 text-[color:var(--mint-500)]" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 2a1 1 0 00-1 1v1a1 1 0 002 0V3a1 1 0 00-1-1zM4 4h3a3 3 0 006 0h3a2 2 0 012 2v9a2 2 0 01-2 2H4a2 2 0 01-2-2V6a2 2 0 012-2zm2.5 7a1.5 1.5 0 100-3 1.5 1.5 0 000 3zm2.45 4a2.5 2.5 0 10-4.9 0h4.9zM12 9a1 1 0 100 2h3a1 1 0 100-2h-3zm-1 4a1 1 0 011-1h2a1 1 0 110 2h-2a1 1 0 01-1-1z" clipRule="evenodd"></path></svg>
+                Income data: offchain
+              </span>
+              <span className="rounded-lg bg-[color:var(--mint-100)] px-4 py-3 flex items-center gap-2 font-medium">
+                <svg className="w-4 h-4 text-[color:var(--mint-500)]" fill="currentColor" viewBox="0 0 20 20"><path d="M4 4a2 2 0 00-2 2v1h16V6a2 2 0 00-2-2H4z"></path><path fillRule="evenodd" d="M18 9H2v5a2 2 0 002 2h12a2 2 0 002-2V9zM4 13a1 1 0 011-1h1a1 1 0 110 2H5a1 1 0 01-1-1zm5-1a1 1 0 100 2h1a1 1 0 100-2H9z" clipRule="evenodd"></path></svg>
+                Credit data: offchain
+              </span>
+              <span className="rounded-lg bg-[color:var(--mint-100)] px-4 py-3 flex items-center gap-2 font-medium">
+                <svg className="w-4 h-4 text-[color:var(--mint-500)]" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M2.166 4.999A11.954 11.954 0 0010 1.944 11.954 11.954 0 0017.834 5c.11.65.166 1.32.166 2.001 0 5.225-3.34 9.67-8 11.317C5.34 16.67 2 12.225 2 7c0-.682.057-1.35.166-2.001zm11.541 3.708a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd"></path></svg>
+                KYC/AML: offchain
+              </span>
+              <span className="rounded-lg bg-[color:var(--mint-100)] px-4 py-3 flex items-center gap-2 font-medium">
+                <svg className="w-4 h-4 text-[color:var(--mint-500)]" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd"></path></svg>
+                AI reasoning: hashed
+              </span>
             </div>
-            </article>
+          </article>
         </div>
       </section>
 

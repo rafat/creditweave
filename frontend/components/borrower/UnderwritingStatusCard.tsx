@@ -37,9 +37,14 @@ export default function UnderwritingStatusCard({
   isError = false,
   errorMessage,
 }: Props) {
+  const [mounted, setMounted] = useState(false);
   const [explanation, setExplanation] = useState<AIExplanation | null>(null);
 
   const reasoningHash = terms?.[5];
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     if (!reasoningHash || /^0x0+$/.test(reasoningHash)) {
@@ -62,6 +67,8 @@ export default function UnderwritingStatusCard({
     };
     fetchExplanation();
   }, [reasoningHash]);
+
+  if (!mounted) return null;
 
   if (isLoading) {
     return (
@@ -104,34 +111,34 @@ export default function UnderwritingStatusCard({
   return (
     <section className="rounded-2xl border bg-[color:var(--card)] p-5">
       <p className="mono text-xs text-[color:var(--ink-700)]">UNDERWRITING STATUS</p>
-      <div className="mt-3 grid gap-3 md:grid-cols-4">
-        <div className="rounded-xl border p-4">
+      <div className="mt-3 grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-5">
+        <div className="rounded-xl border p-3 sm:p-4">
           <p className="mono text-xs text-[color:var(--ink-700)]">STATUS</p>
-          <p className="mt-2 text-2xl font-semibold text-[color:var(--mint-500)]">
+          <p className="mt-2 text-xl font-semibold text-[color:var(--mint-500)] truncate">
             {statusLabel}
           </p>
           <p className="mt-1 text-sm text-[color:var(--ink-700)]">Risk Badge: {riskBadge}</p>
         </div>
-        <div className="rounded-xl border p-4">
+        <div className="rounded-xl border p-3 sm:p-4">
           <p className="mono text-xs text-[color:var(--ink-700)]">CREDIT LIMIT</p>
-          <p className="mt-2 text-2xl font-semibold">
+          <p className="mt-2 text-xl font-semibold truncate">
             ${Number(formatUnits(creditLimit, 18)).toLocaleString()}
           </p>
           <p className="mt-1 text-sm text-[color:var(--ink-700)]">Approved Amount</p>
         </div>
-        <div className="rounded-xl border p-4">
+        <div className="rounded-xl border p-3 sm:p-4">
           <p className="mono text-xs text-[color:var(--ink-700)]">MAX LTV</p>
-          <p className="mt-2 text-2xl font-semibold">{(maxLtvBps / 100).toFixed(2)}%</p>
+          <p className="mt-2 text-xl font-semibold">{(maxLtvBps / 100).toFixed(2)}%</p>
           <p className="mt-1 text-sm text-[color:var(--ink-700)]">{maxLtvBps} bps</p>
         </div>
-        <div className="rounded-xl border p-4">
+        <div className="rounded-xl border p-3 sm:p-4">
           <p className="mono text-xs text-[color:var(--ink-700)]">RATE</p>
-          <p className="mt-2 text-2xl font-semibold">{(rateBps / 100).toFixed(2)}%</p>
+          <p className="mt-2 text-xl font-semibold">{(rateBps / 100).toFixed(2)}%</p>
           <p className="mt-1 text-sm text-[color:var(--ink-700)]">{rateBps} bps</p>
         </div>
-        <div className="rounded-xl border p-4">
+        <div className="rounded-xl border p-3 sm:p-4">
           <p className="mono text-xs text-[color:var(--ink-700)]">NET ASSET VALUE (NAV)</p>
-          <p className="mt-2 text-2xl font-semibold">
+          <p className="mt-2 text-xl font-semibold truncate">
             ${Number(formatUnits(nav, 18)).toLocaleString()}
           </p>
           <p className="mt-1 text-sm text-[color:var(--ink-700)]">Verified Value</p>

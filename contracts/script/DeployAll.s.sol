@@ -2,52 +2,48 @@
 pragma solidity ^0.8.20;
 
 import {Script} from "forge-std/Script.sol";
-import {console} from "forge-std/console.sol";          // ← add this
+import {console} from "forge-std/console.sol";
 
 import {DeployRWAContracts} from "./DeployRWAContracts.s.sol";
 import {DeployCreditWeave} from "./DeployCreditWeave.s.sol";
-import {ConfigureIntegration} from "./ConfigureIntegration.s.sol";
 import {SeedLiquidity} from "./SeedLiquidity.s.sol";
 
 contract DeployAll is Script {
 
     function run() external {
-        DeployRWAContracts cronos = new DeployRWAContracts();
-        DeployRWAContracts.Deployment memory c = cronos.run();
+        // 1. Deploy RWA Infrastructure (Registry + Stablecoin)
+        DeployRWAContracts rwaInfra = new DeployRWAContracts();
+        DeployRWAContracts.Deployment memory rwa = rwaInfra.run();
 
-        DeployCreditWeave cw = new DeployCreditWeave();
-        DeployCreditWeave.Deployment memory w = cw.run(c.stable);
+        // 2. Deploy CreditWeave Core (Lending Pool, Oracle, Underwriting)
+        DeployCreditWeave cwCore = new DeployCreditWeave();
+        DeployCreditWeave.Deployment memory cw = cwCore.run(rwa.stable);
 
-        ConfigureIntegration config = new ConfigureIntegration();
-        config.run(
-            w.lendingPool,
-            c.assetId,
-            c.token,
-            c.logic
-        );
-
+        // 3. Seed Liquidity to Pool (Mint 1M Demo USD to the pool)
         SeedLiquidity seed = new SeedLiquidity();
         seed.run(
-            c.stable,
-            w.lendingPool
+            rwa.stable,
+            cw.lendingPool
         );
 
-        console.log("=== FULL SYSTEM DEPLOYED ===");
+        console.log("=== CORE INFRASTRUCTURE DEPLOYED ===");
 
         // Write deployments to JSON
         string memory root = vm.projectRoot();
         string memory path = string.concat(root, "/deployments.json");
         
         string memory json = "deployments";
-        vm.serializeAddress(json, "underwritingRegistry", w.underwriting);
-        vm.serializeAddress(json, "navOracle", w.navOracle);
-        vm.serializeAddress(json, "lendingPool", w.lendingPool);
-        vm.serializeAddress(json, "rwaAssetRegistry", c.registry);
-        vm.serializeAddress(json, "stablecoin", c.stable);
-        vm.serializeAddress(json, "logic", c.logic);
-        vm.serializeAddress(json, "vault", c.vault);
-        vm.serializeAddress(json, "token", c.token);
-        string memory finalJson = vm.serializeUint(json, "assetId", c.assetId);
+        vm.serializeAddress(json, "underwritingRegistry", cw.underwriting);
+        vm.serializeAddress(json, "navOracle", cw.navOracle);
+        vm.serializeAddress(json, "lendingPool", cw.lendingPool);
+        vm.serializeAddress(json, "rwaAssetRegistry", rwa.registry);
+        vm.serializeAddress(json, "stablecoin", rwa.stable);
+        
+        // These are empty because no asset is deployed yet
+        vm.serializeAddress(json, "logic", address(0));
+        vm.serializeAddress(json, "vault", address(0));
+        vm.serializeAddress(json, "token", address(0));
+        string memory finalJson = vm.serializeUint(json, "assetId", 0);
         
         vm.writeJson(finalJson, path);
         console.log("Deployments written to:", path);
