@@ -35,6 +35,8 @@ const ASSET_STATUSES = [
 
 const APPROVED_CONDITIONAL_STATUS = 1;
 const WATCHLIST_STATUS = 2;
+const WITHDRAW_DUST_DEBT_WEI = 10n ** 14n; // 0.0001 stable units (18 decimals), UI-only
+const MAX_REPAY_BUFFER_WEI = 10n ** 16n; // 0.01 stable units; safe because onchain repay caps to debt
 
 const toBigInt = (value: string): bigint | null => {
   try {
@@ -62,6 +64,7 @@ export default function BorrowForm({ assetIdInput, terms, onTxStateChange }: Pro
   const [borrowAmountInput, setBorrowAmountInput] = useState("");
   const [depositAmountInput, setDepositAmountInput] = useState("");
   const [repayAmountInput, setRepayAmountInput] = useState("");
+  const [withdrawAmountInput, setWithdrawAmountInput] = useState("");
   const contracts = CONTRACTS[SUPPORTED_CHAIN_ID];
   const assetId = useMemo(() => toBigInt(assetIdInput), [assetIdInput]);
   const assetIdArg = assetId ?? 0n;
@@ -353,13 +356,22 @@ export default function BorrowForm({ assetIdInput, terms, onTxStateChange }: Pro
   }
 
   // Withdrawable / Idle math
-  const minSharesToBackDebt = (totalDebt > 0n && nav > 0n && maxLtvBps > 0)
-    ? (((totalDebt * 10000n) / BigInt(maxLtvBps)) * 10n**18n) / nav
+  const effectiveDebtForWithdraw = totalDebt <= WITHDRAW_DUST_DEBT_WEI ? 0n : totalDebt;
+  const minSharesToBackDebt = (effectiveDebtForWithdraw > 0n && nav > 0n && maxLtvBps > 0)
+    ? (((effectiveDebtForWithdraw * 10000n) / BigInt(maxLtvBps)) * 10n**18n) / nav
     : 0n;
+  // UI display rule: if debt backing requires less than 1 full share, treat as zero to avoid phantom 1-share lock.
+  const minSharesToBackDebtForDisplay = minSharesToBackDebt < ONE_SHARE ? 0n : minSharesToBackDebt;
   
-  const withdrawableShares = collateralShares > minSharesToBackDebt 
-    ? collateralShares - minSharesToBackDebt 
+  const withdrawableShares = collateralShares > minSharesToBackDebtForDisplay 
+    ? collateralShares - minSharesToBackDebtForDisplay 
     : 0n;
+  const pledgedWholeShares = (collateralShares / ONE_SHARE) * ONE_SHARE;
+  const withdrawableWholeShares = (withdrawableShares / ONE_SHARE) * ONE_SHARE;
+  const lockedByDebtWholeShares =
+    pledgedWholeShares > withdrawableWholeShares
+      ? pledgedWholeShares - withdrawableWholeShares
+      : 0n;
 
   const depositAmountWei = safeParseUnits(depositAmountInput, 18);
   const needsApproval = allowance < depositAmountWei && depositAmountWei > 0n;
@@ -500,9 +512,41 @@ export default function BorrowForm({ assetIdInput, terms, onTxStateChange }: Pro
   };
 
   const handleMaxRepay = () => {
-    // Repay the smaller of (total accrued debt) or (wallet balance)
-    const amountToSet = totalDebt > stablecoinBalance ? stablecoinBalance : totalDebt;
+    // Include small buffer to clear interest dust; onchain repay is capped to actual debt.
+    const targetRepay = totalDebt + MAX_REPAY_BUFFER_WEI;
+    const amountToSet = targetRepay > stablecoinBalance ? stablecoinBalance : targetRepay;
     setRepayAmountInput(formatUnits(amountToSet, 18));
+  };
+
+  const withdrawAmountWei = safeParseUnits(withdrawAmountInput, 18);
+
+  const handleMaxWithdraw = () => {
+    setWithdrawAmountInput(formatUnits(withdrawableWholeShares, 18));
+  };
+
+  const handleWithdraw = async () => {
+    try {
+      if (!isConnected || !address) throw new Error("Connect wallet first.");
+      if (chainId !== SUPPORTED_CHAIN_ID) throw new Error("Switch to Sepolia first.");
+      if (assetId === null) throw new Error("Asset ID must be a valid integer.");
+      if (withdrawAmountWei <= 0n) throw new Error("Withdraw amount must be greater than zero.");
+      if (withdrawAmountWei > withdrawableWholeShares) {
+        throw new Error("Withdraw amount exceeds withdrawable collateral.");
+      }
+
+      onTxStateChange({ phase: "awaiting_signature", message: "Withdrawing collateral..." });
+      const hash = await writeContractAsync({
+        chainId: SUPPORTED_CHAIN_ID,
+        address: contracts.lendingPool,
+        abi: LENDING_POOL_ABI,
+        functionName: "withdrawCollateral",
+        args: [assetId, withdrawAmountWei],
+      });
+      onTxStateChange({ phase: "submitted", hash, message: "Withdraw submitted..." });
+      setWithdrawAmountInput("");
+    } catch (e) {
+      onTxStateChange({ phase: "failed", message: normalizeTxError(e) });
+    }
   };
 
   const formatCurrency = (value: bigint) => 
@@ -592,7 +636,7 @@ export default function BorrowForm({ assetIdInput, terms, onTxStateChange }: Pro
              </div>
              <div className="flex justify-between border-t pt-1 mt-1">
                <span className="text-gray-500">Already Pledged:</span>
-               <span className="font-semibold text-blue-600">{formatToken(collateralShares)} RWA Shares</span>
+               <span className="font-semibold text-blue-600">{formatToken(pledgedWholeShares)} RWA Shares</span>
              </div>
              <div className="flex justify-between border-t pt-1 mt-1">
                <span className="text-gray-500 flex items-center gap-1">
@@ -607,7 +651,11 @@ export default function BorrowForm({ assetIdInput, terms, onTxStateChange }: Pro
                     </span>
                  </span>
                </span>
-               <span className="font-semibold text-gray-900">{formatToken((withdrawableShares / ONE_SHARE) * ONE_SHARE)} RWA Shares</span>
+               <span className="font-semibold text-gray-900">{formatToken(withdrawableWholeShares)} RWA Shares</span>
+             </div>
+             <div className="flex justify-between border-t pt-1 mt-1">
+               <span className="text-gray-500">Locked by Active Debt:</span>
+               <span className="font-semibold text-gray-900">{formatToken(lockedByDebtWholeShares)} RWA Shares</span>
              </div>
              {approved && minRequiredSharesWei > 0n && (
                <div className="flex justify-between border-t pt-1 mt-1">
@@ -756,6 +804,62 @@ export default function BorrowForm({ assetIdInput, terms, onTxStateChange }: Pro
                <span className="text-gray-500">Total Accrued Debt:</span>
                <span className="font-semibold text-red-600">${formatCurrency(totalDebt)}</span>
              </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="rounded-2xl border bg-white p-5 shadow-sm">
+        <p className="mono text-xs text-[color:var(--ink-700)]">STEP 5: WITHDRAW COLLATERAL</p>
+        <p className="mt-1 text-sm text-[color:var(--ink-700)] mb-4">
+          Withdraw idle collateral shares back to your wallet.
+        </p>
+
+        <div className="flex flex-col gap-4">
+          <div className="flex gap-3 flex-col sm:flex-row">
+            <div className="relative flex-1">
+              <input
+                className="rounded-xl border px-3 py-2 text-sm w-full pr-16"
+                value={withdrawAmountInput}
+                onChange={(e) => setWithdrawAmountInput(e.target.value)}
+                placeholder="Withdraw Amount"
+                type="number"
+                min="0"
+                step="any"
+              />
+              <button
+                type="button"
+                onClick={handleMaxWithdraw}
+                disabled={withdrawableWholeShares === 0n}
+                className="absolute right-2 top-1.5 rounded-lg bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600 hover:bg-gray-200 disabled:opacity-50"
+              >
+                MAX
+              </button>
+            </div>
+            <button
+              onClick={handleWithdraw}
+              disabled={
+                withdrawAmountWei === 0n ||
+                withdrawAmountWei > withdrawableWholeShares
+              }
+              className={`rounded-xl px-8 py-2 text-sm font-medium transition ${
+                withdrawAmountWei > 0n && withdrawAmountWei <= withdrawableWholeShares
+                  ? "bg-black text-white hover:bg-gray-800 shadow-sm"
+                  : "bg-gray-100 text-gray-400 cursor-not-allowed border"
+              }`}
+            >
+              Withdraw
+            </button>
+          </div>
+
+          <div className="rounded-xl bg-gray-50 p-3 text-xs flex flex-col gap-1">
+            <div className="flex justify-between">
+              <span className="text-gray-500">Withdrawable / Idle:</span>
+              <span className="font-semibold text-gray-900">{formatToken(withdrawableWholeShares)} RWA Shares</span>
+            </div>
+            <div className="flex justify-between border-t pt-1 mt-1">
+              <span className="text-gray-500">Locked by Active Debt:</span>
+              <span className="font-semibold text-gray-900">{formatToken(lockedByDebtWholeShares)} RWA Shares</span>
+            </div>
           </div>
         </div>
       </section>

@@ -29,7 +29,7 @@ The smart contracts are enforcement rails. CRE is where real underwriting happen
 - Config keys:
   - `underwritingRegistryAddress`
   - `underwritingRegistryVersion: "v2"`
-  - `gasLimit: "1200000"` (increased for V2 report complexity)
+  - `gasLimit: "1200000"`
 
 Files:
 - Workflow logic: `cre/my-workflow/main.ts`

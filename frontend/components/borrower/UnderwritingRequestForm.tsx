@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { parseUnits } from "viem";
+import { formatUnits, parseUnits } from "viem";
 import { useAccount, useChainId, useWriteContract } from "wagmi";
 import {
   CONTRACTS,
@@ -9,6 +9,7 @@ import {
   UNDERWRITING_REGISTRY_V2_ABI,
 } from "@/lib/contracts";
 import { normalizeTxError, type TxState } from "@/lib/tx";
+import type { TermsTuple } from "@/lib/underwriting";
 import { SUPPORTED_CHAIN_ID } from "@/lib/wagmi";
 
 type Props = {
@@ -16,6 +17,7 @@ type Props = {
   setAssetIdInput: (value: string) => void;
   intendedBorrowInput: string;
   setIntendedBorrowInput: (value: string) => void;
+  terms?: TermsTuple;
   onRefreshReads: () => void;
   onTxStateChange: (tx: TxState) => void;
   onUnderwritingRequestSubmitted?: (hash: `0x${string}`) => void;
@@ -30,11 +32,15 @@ const toBigInt = (value: string): bigint | null => {
   }
 };
 
+const ONE_E18 = 10n ** 18n;
+const PROTOCOL_MAX_REQUEST_USD = 100_000n;
+
 export default function UnderwritingRequestForm({
   assetIdInput,
   setAssetIdInput,
   intendedBorrowInput,
   setIntendedBorrowInput,
+  terms,
   onRefreshReads,
   onTxStateChange,
   onUnderwritingRequestSubmitted,
@@ -59,6 +65,13 @@ export default function UnderwritingRequestForm({
   };
 
   const rawAmount = intendedBorrowInput.replace(/,/g, "");
+  const approvedCreditLimit = terms?.[3] ?? 0n;
+  const protocolHardCapWei = PROTOCOL_MAX_REQUEST_USD * ONE_E18;
+  const underwritingHardCapWei =
+    approvedCreditLimit > 0n && approvedCreditLimit < protocolHardCapWei
+      ? approvedCreditLimit
+      : protocolHardCapWei;
+  const approvedCreditLimitDisplay = Number(formatUnits(underwritingHardCapWei, 18)).toLocaleString();
 
   const submitUnderwritingRequest = async () => {
     try {
@@ -77,6 +90,11 @@ export default function UnderwritingRequestForm({
       const intendedBorrowAmount = parseUnits(rawAmount, 18);
       if (intendedBorrowAmount <= 0n) {
         throw new Error("Intended borrow amount must be greater than zero.");
+      }
+      if (intendedBorrowAmount > underwritingHardCapWei) {
+        throw new Error(
+          `Requested limit exceeds underwriting hard cap ($${approvedCreditLimitDisplay}).`,
+        );
       }
 
       onTxStateChange({
@@ -164,6 +182,9 @@ export default function UnderwritingRequestForm({
               placeholder="100,000"
             />
           </div>
+          <p className="text-[11px] text-gray-500">
+            Current approved hard cap: <span className="font-semibold text-gray-700">${approvedCreditLimitDisplay}</span>
+          </p>
         </div>
       </div>
 

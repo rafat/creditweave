@@ -387,6 +387,7 @@ export default function BorrowerDashboard() {
                     setAssetIdInput={setAssetIdInput}
                     intendedBorrowInput={intendedBorrowInput}
                     setIntendedBorrowInput={setIntendedBorrowInput}
+                    terms={terms}
                     onRefreshReads={() => {
                         pendingAmountRead.refetch();
                       termsRead.refetch();
