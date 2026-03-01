@@ -26,6 +26,7 @@ cp .env.example .env.local
 Required public variables:
 
 - `NEXT_PUBLIC_UNDERWRITING_REGISTRY`
+- `NEXT_PUBLIC_UNDERWRITING_REGISTRY_V2` (optional; when set, frontend uses V2 underwriting reads/events)
 - `NEXT_PUBLIC_NAV_ORACLE`
 - `NEXT_PUBLIC_LENDING_POOL`
 - `NEXT_PUBLIC_RWA_ASSET_REGISTRY`

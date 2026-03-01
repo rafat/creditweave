@@ -4,6 +4,7 @@ import NetworkGuard from "@/components/NetworkGuard";
 import AppNav from "@/components/AppNav";
 import WalletBar from "@/components/WalletBar";
 import SystemHealth from "@/components/admin/SystemHealth";
+import ProtocolControls from "@/components/admin/ProtocolControls";
 
 export default function AdminDashboard() {
   return (
@@ -26,6 +27,7 @@ export default function AdminDashboard() {
 
       <NetworkGuard>
         <SystemHealth />
+        <ProtocolControls />
       </NetworkGuard>
     </main>
   );

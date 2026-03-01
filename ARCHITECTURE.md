@@ -13,14 +13,15 @@ CreditWeave solves this by bifurcating the architecture:
 
 🟢 **Onchain (Public)**
 *   Asset ID
-*   Approved (boolean)
-*   Maximum Loan-to-Value (Max LTV) in Basis Points (Bps)
-*   Interest Rate (Bps)
-*   Expiry Timestamp
+*   Decision status (approved/watchlist/denied)
+*   Effective Maximum Loan-to-Value (Max LTV) in Basis Points (Bps)
+*   Interest Rate (Bps) and Credit Limit
+*   Expiry / review timestamps
 *   `reasoningHash` (Hash of the AI's explanation)
 *   Collateral amount & Borrowed amount
 *   Net Asset Value (NAV)
 *   Liquidations
+*   Portfolio segment controls (optional, via PortfolioRiskRegistry)
 
 🔴 **Offchain Confidential (Never touches the blockchain)**
 *   Borrower income & debt-to-income ratio
@@ -55,15 +56,17 @@ The system operates across three primary layers: the Frontend, the Confidential 
 │  4. Runs Institutional DSCR-based risk scoring          │
 │  5. Calls LLM (Expert CRE Officer) for explanation      │
 │  6. Pushes deep qualitative analysis to Private API     │
-│  7. Posts summarized terms + hash onchain               │
+│  7. Posts V2 decision struct + provenance hash onchain  │
 └───────────────────────────┬─────────────────────────────┘
                             │ (Signed EVM Report)
                             ▼
 ┌─────────────────────────────────────────────────────────┐
 │                     Smart Contracts                     │
-│  - UnderwritingRegistry (Stores terms: LTV, Rate)       │
+│  - UnderwritingRegistryV2 (Stores decision + covenants) │
 │  - NAVOracle (Stores verified asset valuation)          │
 │  - RWALendingPool (Executes borrows & liquidations)     │
+│  - PortfolioRiskRegistry (segment-level controls)       │
+│  - LossWaterfall (junior/senior loss absorption)        │
 │  - RWAAssetRegistry (Lifecycle management)              │
 └─────────────────────────────────────────────────────────┘
 ```
@@ -74,9 +77,12 @@ The system operates across three primary layers: the Frontend, the Confidential 
 
 ### 1. Smart Contracts (Solidity)
 The core DeFi primitives are built to trust the CRE's outputs blindly, acting purely as enforcement mechanisms.
-*   **`UnderwritingRegistry.sol`**: Receives signed reports from the CRE containing the underwriting terms. Now includes **Nonce-based Replay Protection** and an explicit **Pending Request Flag** to ensure reports are only accepted for the latest active borrower request.
+*   **`UnderwritingRegistryV2.sol`**: Receives signed CRE reports containing full decision payloads (`loanProduct`, `status`, `maxLtvBps`, `rateBps`, `creditLimit`, `expiry`, `covenants`, `provenance`). Uses nonce/pending request controls and emits rich `UnderwritingUpdated` events.
+*   **`UnderwritingRegistry.sol`**: Legacy V1 terms registry kept for migration/backward compatibility.
 *   **`NAVOracle.sol`**: Stores the Net Asset Value (NAV) of RWA collateral. Includes a `maxStaleness` mechanism. If a borrower requests a loan and the NAV is stale, the CRE will automatically compute and publish a fresh NAV before underwriting the loan.
-*   **`RWALendingPool.sol`**: The core lending engine. It dynamically computes `_maxBorrowable` and `healthFactor` by querying the `UnderwritingRegistry` for the borrower's specific LTV and Rate, and the `NAVOracle` for the asset's current value. It handles deposits, borrows, repayments, and liquidations.
+*   **`RWALendingPool.sol`**: Core lending engine with V2 adapter support. It computes `_maxBorrowable`/`healthFactor` from underwriting + NAV and supports reserves, bad-debt accounting, and optional loss-waterfall integration.
+*   **`PortfolioRiskRegistry.sol`**: Segment-level risk controls (`borrowPaused`, `ltvHaircutBps`, exposure/delinquency/watchlist thresholds). Pool can apply segment haircuts and pause borrowing by segment.
+*   **`LossWaterfall.sol`**: Capital structure primitive with junior-then-senior loss absorption used when liquidations leave residual bad debt.
 *   **`RWAAssetRegistry.sol`**: Manages the lifecycle of Real World Assets onchain, including registration, contract linking, and status tracking.
 
 ### 2. Confidential Runtime Environment (CRE) Workflow
@@ -84,8 +90,10 @@ The CRE (`my-workflow/main.ts`) is a secure, offchain worker powered by Chainlin
 *   **Institutional DSCR Underwriting Strategy**: The protocol uses the industry-standard **Debt Service Coverage Ratio (DSCR)** for underwriting. It calculates risk tiers based on property rental income versus debt obligations, ensuring institutional-grade credit decisions.
 *   **Active AI Underwriting Agent**: The LLM (Gemini) acts as an active credit officer. It first generates a structured **Proposal JSON** (Risk Tier, LTV adjustments). This proposal is then passed through a **Deterministic Policy Gate** that enforces "tighten-only" logic and ignores low-confidence results, ensuring the AI influences terms safely.
 *   **Confidential Data Aggregation**: Uses a single consolidated `/api/v1/underwriting/context` call to securely request all borrower financials and asset metrics in one snapshot.
+*   **Versioned Registry Support**: Workflow supports both V1 and V2 registry modes, with V2 as the active mode on Sepolia (`UnderwritingRequested(...,uint8 triggerType)` + V2 decision report encoding).
 *   **Audit Trail & Provenance**: Captures a `sourceHash` of all raw inputs used for the decision and pushes it alongside the AI analysis to the Private API, ensuring full auditability of the AI's reasoning.
 *   **Dynamic NAV Computation**: If the `NAVOracle` reports a stale valuation, the CRE dynamically computes a new NAV based on real-time asset metrics (occupancy, market trends, volatility) and posts it onchain before proceeding with underwriting.
+*   **Receiver-Side Verification**: After report submission, CRE verifies receiver state transitioned (request cleared) so forwarder `result=false` failures are treated as hard errors.
 
 ### 3. Private API Proxy (`private-apis/src/server.ts`)
 An Express server that acts as a secure proxy between the CRE and real-world data providers.
@@ -102,9 +110,10 @@ A coordination layer that ensures all folders (contracts, frontend, cre) share t
 
 ### 4. Frontend Application (Next.js)
 A modern dashboard for borrowers to interact with the protocol.
-*   **Tokenization Wizard**: A step-by-step UI allowing borrowers to tokenize a physical property (e.g., in Miami, LA, or NY). It triggers a backend Foundry script (`TokenizeAsset.s.sol`) to automate the 8-step onchain setup process.
+*   **Tokenization Wizard**: A step-by-step UI allowing borrowers to tokenize a physical property and set V2 underwriting product + optional portfolio segment at mint time. It triggers a backend Foundry script (`TokenizeAsset.s.sol`) to automate onchain setup.
 *   **AI Underwriting Dashboard**: Dynamically queries the Private API for deep AI qualitative analysis and renders it with stylized confidence badges and detailed risk factor lists.
 *   **Real-time Observability**: Uses `wagmi` with active blockchain polling and expanded block windows to ensure the dashboard reflects the latest onchain requests and terms.
+*   **Dynamic Collateral Buffering**: Deposit helper computes product-aware safety targets (Stabilized 20%, Bridge 30%, Construction Lite 35%, +10% under watchlist/conditional or segment haircut) and uses V2 `effectiveMaxLtvBps`.
 
 ---
 

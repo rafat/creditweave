@@ -34,8 +34,11 @@ contract DeployAll is Script {
         
         string memory json = "deployments";
         vm.serializeAddress(json, "underwritingRegistry", cw.underwriting);
+        vm.serializeAddress(json, "underwritingRegistryV2", cw.underwritingV2);
         vm.serializeAddress(json, "navOracle", cw.navOracle);
         vm.serializeAddress(json, "lendingPool", cw.lendingPool);
+        vm.serializeAddress(json, "portfolioRiskRegistry", cw.portfolioRiskRegistry);
+        vm.serializeAddress(json, "lossWaterfall", cw.lossWaterfall);
         vm.serializeAddress(json, "rwaAssetRegistry", rwa.registry);
         vm.serializeAddress(json, "stablecoin", rwa.stable);
         

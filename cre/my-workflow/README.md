@@ -64,6 +64,18 @@ Required secrets in `cre/secrets.yaml`:
 - `CRE_API_KEY`: For authenticated Private API access
 - `WORKFLOW_OWNER_PRIVATE_KEY`: For signing onchain reports
 
+## Registry Version Compatibility
+
+Set `underwritingRegistryVersion` in `config.staging.json` / `config.production.json`:
+
+- `"v1"`: uses legacy report shape (`approved`, `maxLtvBps`, `rateBps`, `creditLimit`, `expiry`, `reasoningHash`)
+- `"v2"`: uses `UnderwritingDecision` struct report shape (loan product, status, covenants, provenance)
+
+Event trigger signatures are selected automatically by this setting:
+
+- V1: `UnderwritingRequested(address,uint256,uint256,uint64)`
+- V2: `UnderwritingRequested(address,uint256,uint256,uint64,uint8)`
+
 ## Local Run
 
 1. Start private API server:

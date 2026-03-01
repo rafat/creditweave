@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { keccak256, parseAbiItem, toHex } from "viem";
+import { keccak256, parseAbiItem, toHex, zeroAddress } from "viem";
 import { useAccount, useChainId, usePublicClient, useReadContract, useWaitForTransactionReceipt } from "wagmi";
 import AppNav from "@/components/AppNav";
 import BorrowForm from "@/components/borrower/BorrowForm";
@@ -12,7 +12,12 @@ import NetworkGuard from "@/components/NetworkGuard";
 import TxStatusInline from "@/components/TxStatusInline";
 import TxToast from "@/components/TxToast";
 import WalletBar from "@/components/WalletBar";
-import { CONTRACTS, NAV_ORACLE_ABI, UNDERWRITING_REGISTRY_ABI } from "@/lib/contracts";
+import {
+  CONTRACTS,
+  NAV_ORACLE_ABI,
+  UNDERWRITING_REGISTRY_ABI,
+  UNDERWRITING_REGISTRY_V2_ABI,
+} from "@/lib/contracts";
 import { normalizeTxError, type TxState } from "@/lib/tx";
 import type { TermsTuple } from "@/lib/underwriting";
 import { SUPPORTED_CHAIN_ID } from "@/lib/wagmi";
@@ -27,6 +32,9 @@ const toBigInt = (value: string): bigint | null => {
 
 const UNDERWRITING_REQUESTED_EVENT = parseAbiItem(
   "event UnderwritingRequested(address indexed borrower, uint256 indexed assetId, uint256 intendedBorrowAmount, uint64 nonce)",
+);
+const UNDERWRITING_REQUESTED_EVENT_V2 = parseAbiItem(
+  "event UnderwritingRequested(address indexed borrower, uint256 indexed assetId, uint256 intendedBorrowAmount, uint64 nonce, uint8 triggerType)",
 );
 
 import AssetSelector from "./AssetSelector";
@@ -53,7 +61,11 @@ export default function BorrowerDashboard() {
   } | null>(null);
 
   const assetId = useMemo(() => toBigInt(assetIdInput), [assetIdInput]);
+  const borrowerArg = (address ?? zeroAddress) as `0x${string}`;
+  const assetIdArg = assetId ?? 0n;
   const contracts = CONTRACTS[SUPPORTED_CHAIN_ID];
+  const underwritingAddress = contracts.activeUnderwritingRegistry;
+  const isV2 = contracts.usesUnderwritingV2;
 
   const { isLoading: isConfirming, isSuccess: isConfirmed, error: receiptError } = useWaitForTransactionReceipt({
     hash: tx.hash,
@@ -66,10 +78,10 @@ export default function BorrowerDashboard() {
 
   const pendingAmountRead = useReadContract({
     chainId: SUPPORTED_CHAIN_ID,
-    address: contracts.underwritingRegistry,
-    abi: UNDERWRITING_REGISTRY_ABI,
+    address: underwritingAddress,
+    abi: isV2 ? UNDERWRITING_REGISTRY_V2_ABI : UNDERWRITING_REGISTRY_ABI,
     functionName: "getRequestedBorrowAmount",
-    args: address && assetId !== null ? [address, assetId] : undefined,
+    args: [borrowerArg, assetIdArg],
     query: {
       enabled: Boolean(address && assetId !== null && currentChainId === SUPPORTED_CHAIN_ID),
       refetchInterval: 10000,
@@ -81,9 +93,45 @@ export default function BorrowerDashboard() {
     address: contracts.underwritingRegistry,
     abi: UNDERWRITING_REGISTRY_ABI,
     functionName: "getTerms",
-    args: address && assetId !== null ? [address, assetId] : undefined,
+    args: [borrowerArg, assetIdArg],
     query: {
-      enabled: Boolean(address && assetId !== null && currentChainId === SUPPORTED_CHAIN_ID),
+      enabled: Boolean(!isV2 && address && assetId !== null && currentChainId === SUPPORTED_CHAIN_ID),
+      refetchInterval: 10000,
+    },
+  });
+
+  const v2BorrowingTermsRead = useReadContract({
+    chainId: SUPPORTED_CHAIN_ID,
+    address: underwritingAddress,
+    abi: UNDERWRITING_REGISTRY_V2_ABI,
+    functionName: "getBorrowingTerms",
+    args: [borrowerArg, assetIdArg],
+    query: {
+      enabled: Boolean(isV2 && address && assetId !== null && currentChainId === SUPPORTED_CHAIN_ID),
+      refetchInterval: 10000,
+    },
+  });
+
+  const v2DecisionRead = useReadContract({
+    chainId: SUPPORTED_CHAIN_ID,
+    address: underwritingAddress,
+    abi: UNDERWRITING_REGISTRY_V2_ABI,
+    functionName: "getDecision",
+    args: [borrowerArg, assetIdArg],
+    query: {
+      enabled: Boolean(isV2 && address && assetId !== null && currentChainId === SUPPORTED_CHAIN_ID),
+      refetchInterval: 10000,
+    },
+  });
+
+  const v2ApprovedRead = useReadContract({
+    chainId: SUPPORTED_CHAIN_ID,
+    address: underwritingAddress,
+    abi: UNDERWRITING_REGISTRY_V2_ABI,
+    functionName: "isApproved",
+    args: [borrowerArg, assetIdArg],
+    query: {
+      enabled: Boolean(isV2 && address && assetId !== null && currentChainId === SUPPORTED_CHAIN_ID),
       refetchInterval: 10000,
     },
   });
@@ -93,7 +141,7 @@ export default function BorrowerDashboard() {
     address: contracts.navOracle,
     abi: NAV_ORACLE_ABI,
     functionName: "getNAVData",
-    args: assetId !== null ? [assetId] : undefined,
+    args: [assetIdArg],
     query: {
       enabled: Boolean(assetId !== null && currentChainId === SUPPORTED_CHAIN_ID),
       refetchInterval: 10000,
@@ -136,8 +184,10 @@ export default function BorrowerDashboard() {
   useEffect(() => {
     if (!underwritingTxHash || !underwritingReceipt.data) return;
 
-    const eventTopic = keccak256(toHex("UnderwritingRequested(address,uint256,uint256,uint64)"));
-    const targetAddress = contracts.underwritingRegistry.toLowerCase();
+    const eventTopic = isV2
+      ? keccak256(toHex("UnderwritingRequested(address,uint256,uint256,uint64,uint8)"))
+      : keccak256(toHex("UnderwritingRequested(address,uint256,uint256,uint64)"));
+    const targetAddress = underwritingAddress.toLowerCase();
 
     const targetLogPosition = underwritingReceipt.data.logs.findIndex((log) => {
       const logAddress = log.address.toLowerCase();
@@ -151,13 +201,38 @@ export default function BorrowerDashboard() {
     }
     // CRE simulate expects event index relative to this tx's logs array (0-based).
     setUnderwritingEventIndex(targetLogPosition);
-  }, [contracts.underwritingRegistry, underwritingReceipt.data, underwritingTxHash]);
+  }, [underwritingAddress, underwritingReceipt.data, underwritingTxHash, isV2]);
 
-  const terms = termsRead.data as TermsTuple | undefined;
+  const terms = useMemo(() => {
+    if (!isV2) {
+      return termsRead.data as TermsTuple | undefined;
+    }
+
+    const borrowing = v2BorrowingTermsRead.data as [number, number, bigint, bigint] | undefined;
+    const decision = v2DecisionRead.data as
+      | {
+          reasoningHash?: `0x${string}`;
+          status?: number;
+        }
+      | undefined;
+    const approved = (v2ApprovedRead.data as boolean | undefined) ?? false;
+    if (!borrowing) return undefined;
+
+    const [maxLtvBps, rateBps, creditLimit, expiry] = borrowing;
+    const reasoningHash = (decision?.reasoningHash ??
+      "0x0000000000000000000000000000000000000000000000000000000000000000") as `0x${string}`;
+
+    return [approved, Number(maxLtvBps), Number(rateBps), creditLimit, expiry, reasoningHash] as TermsTuple;
+  }, [isV2, termsRead.data, v2BorrowingTermsRead.data, v2DecisionRead.data, v2ApprovedRead.data]);
   const pendingBorrowAmount = (pendingAmountRead.data as bigint | undefined) ?? 0n;
-  const statusLoading = pendingAmountRead.isLoading || termsRead.isLoading;
-  const statusError = pendingAmountRead.isError || termsRead.isError;
-  const statusErrorMessage = pendingAmountRead.error?.message ?? termsRead.error?.message;
+  const statusLoading = pendingAmountRead.isLoading || termsRead.isLoading || v2BorrowingTermsRead.isLoading || v2DecisionRead.isLoading;
+  const statusError = pendingAmountRead.isError || termsRead.isError || v2BorrowingTermsRead.isError || v2DecisionRead.isError || v2ApprovedRead.isError;
+  const statusErrorMessage =
+    pendingAmountRead.error?.message ??
+    termsRead.error?.message ??
+    v2BorrowingTermsRead.error?.message ??
+    v2DecisionRead.error?.message ??
+    v2ApprovedRead.error?.message;
 
   useEffect(() => {
     if (!publicClient || !address || assetId === null || currentChainId !== SUPPORTED_CHAIN_ID) return;
@@ -174,8 +249,8 @@ export default function BorrowerDashboard() {
           const fromBlock = latestBlock > windowSize ? latestBlock - windowSize : 0n;
           try {
             const candidateLogs = await publicClient.getLogs({
-              address: contracts.underwritingRegistry,
-              event: UNDERWRITING_REQUESTED_EVENT,
+              address: underwritingAddress,
+              event: isV2 ? UNDERWRITING_REQUESTED_EVENT_V2 : UNDERWRITING_REQUESTED_EVENT,
               fromBlock,
               toBlock: "latest",
             });
@@ -228,7 +303,7 @@ export default function BorrowerDashboard() {
       isCancelled = true;
       clearInterval(interval);
     };
-  }, [address, assetId, contracts.underwritingRegistry, currentChainId, publicClient]);
+  }, [address, assetId, underwritingAddress, currentChainId, publicClient, isV2]);
 
   useEffect(() => {
     if (pendingBorrowAmount === 0n) return;
@@ -273,7 +348,7 @@ export default function BorrowerDashboard() {
               pendingBorrowAmount={pendingBorrowAmount}
               terms={terms}
               nav={navRead.data ? (navRead.data as [bigint, bigint, `0x${string}`])[0] : 0n}
-              registryAddress={contracts.underwritingRegistry}
+              registryAddress={underwritingAddress}
               isLoading={statusLoading}
               isError={statusError}
               errorMessage={statusErrorMessage}
@@ -314,7 +389,10 @@ export default function BorrowerDashboard() {
                     setIntendedBorrowInput={setIntendedBorrowInput}
                     onRefreshReads={() => {
                         pendingAmountRead.refetch();
-                        termsRead.refetch();
+                      termsRead.refetch();
+                      v2BorrowingTermsRead.refetch();
+                      v2DecisionRead.refetch();
+                      v2ApprovedRead.refetch();
                     }}
                     onTxStateChange={setTx}
                     onUnderwritingRequestSubmitted={(hash) => {

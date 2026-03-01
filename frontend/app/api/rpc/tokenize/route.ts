@@ -9,10 +9,21 @@ const execAsync = promisify(exec);
 
 export async function POST(request: Request) {
   try {
-    const { propertyAddress, assetValue, rentAmount, borrowerAddress } = await request.json();
+    const { propertyAddress, assetValue, rentAmount, borrowerAddress, loanProduct, segmentId } = await request.json();
 
     if (!propertyAddress || !assetValue || !rentAmount || !borrowerAddress) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
+    }
+    const loanProductValue = Number(loanProduct ?? 1);
+    if (!Number.isInteger(loanProductValue) || loanProductValue < 1 || loanProductValue > 3) {
+      return NextResponse.json({ error: "loanProduct must be 1 (Bridge), 2 (Stabilized Term), or 3 (Construction Lite)" }, { status: 400 });
+    }
+    if (
+      typeof segmentId === "string" &&
+      segmentId.length > 0 &&
+      !/^0x[a-fA-F0-9]{64}$/.test(segmentId)
+    ) {
+      return NextResponse.json({ error: "segmentId must be a bytes32 hex value" }, { status: 400 });
     }
 
     const privateKey = process.env.ADMIN_PRIVATE_KEY;
@@ -25,6 +36,11 @@ export async function POST(request: Request) {
     // Build the command to run the Foundry script
     const scriptPath = "script/TokenizeAsset.s.sol";
     const cwd = path.resolve(process.cwd(), "../contracts");
+    const deploymentsAny = DEPLOYMENTS as Record<string, string | number | undefined>;
+    const underwritingV2Address =
+      process.env.NEXT_PUBLIC_UNDERWRITING_REGISTRY_V2 || (deploymentsAny.underwritingRegistryV2 as string | undefined);
+    const portfolioRiskRegistryAddress =
+      process.env.NEXT_PUBLIC_PORTFOLIO_RISK_REGISTRY || (deploymentsAny.portfolioRiskRegistry as string | undefined);
 
     const envVars = {
       ...process.env,
@@ -33,8 +49,12 @@ export async function POST(request: Request) {
       ASSET_VALUE: assetValue.toString(),
       RENT_AMOUNT: rentAmount.toString(),
       ORIGINATOR: borrowerAddress,
+      LOAN_PRODUCT: loanProductValue.toString(),
       NEXT_PUBLIC_RWA_ASSET_REGISTRY: process.env.NEXT_PUBLIC_RWA_ASSET_REGISTRY || DEPLOYMENTS.rwaAssetRegistry,
       NEXT_PUBLIC_LENDING_POOL: process.env.NEXT_PUBLIC_LENDING_POOL || DEPLOYMENTS.lendingPool,
+      ...(underwritingV2Address ? { UNDERWRITING_REGISTRY_V2: underwritingV2Address } : {}),
+      ...(portfolioRiskRegistryAddress ? { PORTFOLIO_RISK_REGISTRY: portfolioRiskRegistryAddress } : {}),
+      ...(typeof segmentId === "string" && segmentId.length > 0 ? { SEGMENT_ID: segmentId } : {}),
     };
 
     console.log(`[Tokenize] Running Foundry script in ${cwd} for originator ${borrowerAddress}...`);

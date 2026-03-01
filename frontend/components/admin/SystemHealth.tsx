@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { parseAbiItem } from "viem";
+import { decodeEventLog, keccak256, parseAbi, parseAbiItem, toHex } from "viem";
 import { useChainId, usePublicClient } from "wagmi";
 import { CONTRACTS } from "@/lib/contracts";
 import { SUPPORTED_CHAIN_ID } from "@/lib/wagmi";
@@ -21,9 +21,12 @@ type CreSignal = {
   txHash?: string;
 };
 
-const UNDERWRITING_UPDATED_EVENT = parseAbiItem(
+const UNDERWRITING_UPDATED_EVENT_V1 = parseAbiItem(
   "event UnderwritingUpdated(address indexed borrower, uint256 indexed assetId, bool approved, uint16 maxLtvBps, uint16 rateBps, uint256 expiry, bytes32 reasoningHash)",
 );
+const UNDERWRITING_UPDATED_ABI_V2 = parseAbi([
+  "event UnderwritingUpdated(address indexed borrower, uint256 indexed assetId, uint64 nonce, uint8 loanProduct, uint8 status, uint16 maxLtvBps, uint16 rateBps, uint256 creditLimit, uint256 expiry, uint256 nextReviewAt, uint256 gracePeriodEnd, bytes32 reasoningHash, bytes32 policyVersion, bytes32 decisionId, bytes32 sourceHash, bytes32 covenantSetHash)",
+]);
 
 const getApiHealth = async (baseUrl: string): Promise<ApiHealth> => {
   const start = Date.now();
@@ -98,19 +101,46 @@ export default function SystemHealth() {
       const fromBlock = latestBlock > 5000n ? latestBlock - 5000n : 0n;
 
       const logs = await publicClient.getLogs({
-        address: contracts.underwritingRegistry,
-        event: UNDERWRITING_UPDATED_EVENT,
+        address: contracts.activeUnderwritingRegistry,
         fromBlock,
         toBlock: "latest",
       });
 
-      if (logs.length === 0) {
+      const v1Topic = keccak256(
+        toHex("UnderwritingUpdated(address,uint256,bool,uint16,uint16,uint256,bytes32)")
+      ).toLowerCase();
+      const v2Topic = keccak256(
+        toHex("UnderwritingUpdated(address,uint256,uint64,uint8,uint8,uint16,uint16,uint256,uint256,uint256,uint256,bytes32,bytes32,bytes32,bytes32,bytes32)")
+      ).toLowerCase();
+
+      const underwritingLogs = logs.filter((log) => {
+        const topic0 = (log.topics[0] ?? "").toLowerCase();
+        return topic0 === v1Topic || topic0 === v2Topic;
+      });
+
+      if (underwritingLogs.length === 0) {
         setCreSignal({
           state: "degraded",
           detail: "No recent UnderwritingUpdated events",
         });
       } else {
-        const lastLog = logs[logs.length - 1];
+        const lastLog = underwritingLogs[underwritingLogs.length - 1];
+        const topic0 = (lastLog.topics[0] ?? "").toLowerCase();
+        if (topic0 === v2Topic) {
+          decodeEventLog({
+            abi: UNDERWRITING_UPDATED_ABI_V2,
+            data: lastLog.data,
+            topics: lastLog.topics,
+            eventName: "UnderwritingUpdated",
+          });
+        } else {
+          decodeEventLog({
+            abi: [UNDERWRITING_UPDATED_EVENT_V1],
+            data: lastLog.data,
+            topics: lastLog.topics,
+            eventName: "UnderwritingUpdated",
+          });
+        }
         setCreSignal({
           state: "healthy",
           detail: "Recent underwriting event observed",
@@ -126,7 +156,7 @@ export default function SystemHealth() {
     }
 
     setLastCheckedAt(new Date().toISOString());
-  }, [contracts.underwritingRegistry, publicClient]);
+  }, [contracts.activeUnderwritingRegistry, publicClient]);
 
   useEffect(() => {
     refreshHealth();

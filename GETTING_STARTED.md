@@ -16,7 +16,7 @@ forge test -vv
 
 # 2. Deploy to Sepolia (requires env vars: SEPOLIA_RPC_URL, PRIVATE_KEY)
 source.env
-forge script script/DeployAll.s.sol \                                     
+forge script script/DeployAll.s.sol \                                 
   --rpc-url sepolia \
   --private-key $PRIVATE_KEY \
   --broadcast \

@@ -14,8 +14,11 @@ import {
 } from "@chainlink/cre-sdk";
 import { type Address, decodeEventLog, decodeFunctionResult, encodeAbiParameters, encodeFunctionData, keccak256, parseAbi, toHex, zeroAddress } from "viem";
 
-const UNDERWRITING_EVENT_ABI = parseAbi([
+const UNDERWRITING_EVENT_ABI_V1 = parseAbi([
   "event UnderwritingRequested(address indexed borrower, uint256 indexed assetId, uint256 intendedBorrowAmount, uint64 nonce)",
+]);
+const UNDERWRITING_EVENT_ABI_V2 = parseAbi([
+  "event UnderwritingRequested(address indexed borrower, uint256 indexed assetId, uint256 intendedBorrowAmount, uint64 nonce, uint8 triggerType)",
 ]);
 
 const ASSET_REGISTRY_ABI = parseAbi([
@@ -30,6 +33,9 @@ const NAV_ORACLE_ABI = parseAbi([
 
 const UNDERWRITING_REGISTRY_ABI = parseAbi([
   "function getRequestedBorrowAmount(address borrower, uint256 assetId) view returns (uint256)",
+]);
+const UNDERWRITING_REGISTRY_V2_ABI = parseAbi([
+  "function getRequestContext(address borrower, uint256 assetId) view returns (uint256 intendedBorrowAmount, uint64 nonce, bool pending, uint8 triggerType, uint256 requestedAt, bytes32 reviewCycleId, uint8 loanProduct)",
 ]);
 
 const processedRequestIds = new Set<string>();
@@ -49,6 +55,7 @@ type Config = {
   maxLtvBaseBps: number;
   maxLtvReductionPerRiskTier: number;
   gasLimit?: string;
+  underwritingRegistryVersion?: "v1" | "v2";
 };
 
 interface BorrowerMetrics {
@@ -133,6 +140,9 @@ interface OnchainTerms {
   creditLimit: bigint;
   expiry: bigint;
   reasoningHash: `0x${string}`;
+  loanProduct: number;
+  status: number;
+  triggerType: number;
 }
 
 interface UnderwritingContextResponse {
@@ -477,6 +487,44 @@ const fetchRequestedBorrowAmount = (
     functionName: "getRequestedBorrowAmount",
     data: bytesToHex(result.data),
   });
+};
+
+const fetchRequestContextV2 = (
+  runtime: Runtime<Config>,
+  evmClient: EVMClient,
+  registryAddress: Address,
+  borrower: Address,
+  assetId: bigint,
+): { intendedBorrowAmount: bigint; loanProduct: number; pending: boolean; nonce: bigint; triggerType: number } => {
+  const callData = encodeFunctionData({
+    abi: UNDERWRITING_REGISTRY_V2_ABI,
+    functionName: "getRequestContext",
+    args: [borrower, assetId],
+  });
+  const result = evmClient
+    .callContract(runtime, {
+      call: encodeCallMsg({
+        from: zeroAddress,
+        to: registryAddress,
+        data: callData,
+      }),
+      blockNumber: LATEST_BLOCK_NUMBER,
+    })
+    .result();
+
+  const decoded = decodeFunctionResult({
+    abi: UNDERWRITING_REGISTRY_V2_ABI,
+    functionName: "getRequestContext",
+    data: bytesToHex(result.data),
+  });
+
+  return {
+    intendedBorrowAmount: decoded[0],
+    nonce: decoded[1],
+    pending: Boolean(decoded[2]),
+    triggerType: Number(decoded[3]),
+    loanProduct: Number(decoded[6]),
+  };
 };
 
 const fetchBorrowerData = (
@@ -1019,7 +1067,7 @@ const updateNavOnchain = (
   return bytesToHex(writeResult.txHash || new Uint8Array(32));
 };
 
-const encodeUnderwritingReport = (terms: OnchainTerms): `0x${string}` => {
+const encodeUnderwritingReportV1 = (terms: OnchainTerms): `0x${string}` => {
   return encodeAbiParameters(
     [
       { type: "address" },
@@ -1046,13 +1094,97 @@ const encodeUnderwritingReport = (terms: OnchainTerms): `0x${string}` => {
   );
 };
 
+const encodeUnderwritingReportV2 = (terms: OnchainTerms, sourceHash: `0x${string}`): `0x${string}` => {
+  return encodeAbiParameters(
+    [
+      { type: "address" },
+      { type: "uint256" },
+      { type: "uint64" },
+      {
+        type: "tuple",
+        components: [
+          { type: "uint8" }, // loanProduct
+          { type: "uint8" }, // status
+          { type: "uint16" }, // maxLtvBps
+          { type: "uint16" }, // rateBps
+          { type: "uint256" }, // creditLimit
+          { type: "uint256" }, // expiry
+          { type: "uint256" }, // nextReviewAt
+          { type: "uint256" }, // gracePeriodEnd
+          { type: "bytes32" }, // reasoningHash
+          {
+            type: "tuple",
+            components: [
+              { type: "uint16" }, // minDscrBps
+              { type: "uint16" }, // maxDtiBps
+              { type: "uint16" }, // maxLtvBps
+              { type: "uint16" }, // maxVacancyBps
+              { type: "uint16" }, // cashTrapTriggerBps
+              { type: "uint32" }, // reportingCadenceDays
+            ],
+          },
+          {
+            type: "tuple",
+            components: [
+              { type: "bytes32" }, // policyVersion
+              { type: "bytes32" }, // decisionId
+              { type: "bytes32" }, // sourceHash
+              { type: "uint8" }, // triggerType
+              { type: "bytes32" }, // creditCommitteeFlags
+              { type: "bytes32" }, // covenantSetHash
+            ],
+          },
+        ],
+      },
+    ],
+    [
+      terms.borrower,
+      terms.assetId,
+      terms.nonce,
+      [
+        terms.loanProduct,
+        terms.status,
+        terms.maxLtvBps,
+        terms.rateBps,
+        terms.creditLimit,
+        terms.expiry,
+        BigInt(Math.floor(Date.now() / 1000) + 7 * 24 * 60 * 60),
+        BigInt(Math.floor(Date.now() / 1000) + 3 * 24 * 60 * 60),
+        terms.reasoningHash,
+        [11000, 5500, terms.maxLtvBps, 2000, 10000, 30],
+        [
+          keccak256(toHex("creditweave-underwriting-policy-v2")),
+          keccak256(toHex(`${terms.borrower}-${terms.assetId.toString()}-${terms.nonce.toString()}`)),
+          sourceHash,
+          terms.triggerType,
+          keccak256(toHex("AUTO_POLICY")),
+          keccak256(
+            encodeAbiParameters(
+              [
+                { type: "uint16" },
+                { type: "uint16" },
+                { type: "uint16" },
+                { type: "uint16" },
+                { type: "uint16" },
+                { type: "uint32" },
+              ],
+              [11000, 5500, terms.maxLtvBps, 2000, 10000, 30],
+            ),
+          ),
+        ],
+      ],
+    ],
+  );
+};
+
 const onUnderwritingRequest = async (runtime: Runtime<Config>, eventLog: EVMLog) => {
   const { underwritingRegistryAddress, rwaAssetRegistryAddress, navOracleAddress, privateApiUrl } = runtime.config;
   const chainSelector = getChainSelector(runtime.config);
   const evmClient = new cre.capabilities.EVMClient(chainSelector);
 
+  const registryVersion = runtime.config.underwritingRegistryVersion ?? "v1";
   const decodedEvent = decodeEventLog({
-    abi: UNDERWRITING_EVENT_ABI,
+    abi: registryVersion === "v2" ? UNDERWRITING_EVENT_ABI_V2 : UNDERWRITING_EVENT_ABI_V1,
     topics: eventLog.topics.map((topic) => bytesToHex(topic)) as [signature: `0x${string}`, ...args: `0x${string}`[]],
     data: bytesToHex(eventLog.data),
     eventName: "UnderwritingRequested",
@@ -1062,6 +1194,7 @@ const onUnderwritingRequest = async (runtime: Runtime<Config>, eventLog: EVMLog)
   const assetId = decodedEvent.args.assetId as bigint;
   const intendedBorrowAmountFromEvent = decodedEvent.args.intendedBorrowAmount as bigint;
   const nonce = decodedEvent.args.nonce as bigint;
+  const eventTriggerType = Number((decodedEvent.args as any).triggerType ?? 0);
   const txHashHex = bytesToHex(eventLog.txHash);
   const requestId = keccak256(
     encodeAbiParameters(
@@ -1114,6 +1247,9 @@ const onUnderwritingRequest = async (runtime: Runtime<Config>, eventLog: EVMLog)
     borrower,
     assetId,
   );
+  const requestCtxV2 = registryVersion === "v2"
+    ? fetchRequestContextV2(runtime, evmClient, underwritingRegistryAddress, borrower, assetId)
+    : null;
   logStep(runtime, requestId, "3", "Onchain context loaded", {
     assetStatus: assetData.currentStatus,
     navIsFresh: navSnapshot.isFresh,
@@ -1137,7 +1273,7 @@ const onUnderwritingRequest = async (runtime: Runtime<Config>, eventLog: EVMLog)
       requestedBorrowAmountFromRegistry: requestedBorrowAmountFromRegistry.toString(),
     });
   }
-  const requestedLoanAmount = requestedBorrowAmountFromRegistry;
+  const requestedLoanAmount = requestCtxV2?.intendedBorrowAmount ?? requestedBorrowAmountFromRegistry;
   logStep(runtime, requestId, "4", "Fetching normalized underwriting context (single confidential call)");
   const ctx = fetchUnderwritingContext(
     runtime,
@@ -1368,6 +1504,9 @@ const onUnderwritingRequest = async (runtime: Runtime<Config>, eventLog: EVMLog)
     creditLimit: requestedLoanAmount,
     expiry: BigInt(finalOutput.expiry),
     reasoningHash: keccak256(toHex(new TextEncoder().encode(finalOutput.explanation))),
+    loanProduct: requestCtxV2?.loanProduct ?? 0,
+    status: finalOutput.approved ? 1 : 3, // APPROVED_CONDITIONAL or DENIED
+    triggerType: requestCtxV2?.triggerType ?? eventTriggerType,
   };
 
   try {
@@ -1397,7 +1536,9 @@ const onUnderwritingRequest = async (runtime: Runtime<Config>, eventLog: EVMLog)
     });
   }
 
-  const encodedPayload = encodeUnderwritingReport(terms);
+  const encodedPayload = registryVersion === "v2"
+    ? encodeUnderwritingReportV2(terms, ctx.sourceHash)
+    : encodeUnderwritingReportV1(terms);
   logStep(runtime, requestId, "11", "Building signed CRE report");
   const report = runtime
     .report({
@@ -1424,6 +1565,30 @@ const onUnderwritingRequest = async (runtime: Runtime<Config>, eventLog: EVMLog)
   }
 
   const txHash = bytesToHex(writeResult.txHash || new Uint8Array(32));
+  // Forwarder can return a successful tx while receiver processing fails (result=false).
+  // Verify receiver state transitioned as expected before marking success.
+  if (registryVersion === "v2") {
+    const post = fetchRequestContextV2(runtime, evmClient, underwritingRegistryAddress, borrower, assetId);
+    if (post.pending || post.intendedBorrowAmount > 0n) {
+      throw new Error(
+        `Underwriting write not applied on receiver (v2 pending=${post.pending}, intendedBorrowAmount=${post.intendedBorrowAmount.toString()}, txHash=${txHash})`,
+      );
+    }
+  } else {
+    const remaining = fetchRequestedBorrowAmount(
+      runtime,
+      evmClient,
+      underwritingRegistryAddress,
+      borrower,
+      assetId,
+    );
+    if (remaining > 0n) {
+      throw new Error(
+        `Underwriting write not applied on receiver (v1 requestedBorrowAmount=${remaining.toString()}, txHash=${txHash})`,
+      );
+    }
+  }
+
   logStep(runtime, requestId, "13", "Report submitted successfully", {
     txHash,
     borrower,
@@ -1467,7 +1632,11 @@ const initWorkflow = (config: Config) => {
   const evmClient = new cre.capabilities.EVMClient(chainSelector);
 
   const eventSignature = keccak256(
-    toHex("UnderwritingRequested(address,uint256,uint256)"),
+    toHex(
+      (config.underwritingRegistryVersion ?? "v1") === "v2"
+        ? "UnderwritingRequested(address,uint256,uint256,uint64,uint8)"
+        : "UnderwritingRequested(address,uint256,uint256,uint64)"
+    ),
   );
 
   const trigger = evmClient.logTrigger({

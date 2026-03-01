@@ -9,17 +9,24 @@ import "../src/RWARevenueVault.sol";
 import "../src/InvestorShareToken.sol";
 import "../src/RWALendingPool.sol";
 import "../src/RWACommonTypes.sol";
+import "../src/UnderwritingRegistryV2.sol";
+import "../src/UnderwritingPolicyTypes.sol";
+import "../src/PortfolioRiskRegistry.sol";
 
 contract TokenizeAsset is Script {
     function run() external {
         // Retrieve addresses from environment variables passed from the backend
         address registryAddress = vm.envAddress("NEXT_PUBLIC_RWA_ASSET_REGISTRY");
         address lendingPoolAddress = vm.envAddress("NEXT_PUBLIC_LENDING_POOL");
-        
+        address underwritingV2Address = vm.envOr("UNDERWRITING_REGISTRY_V2", address(0));
+        address portfolioRiskRegistryAddress = vm.envOr("PORTFOLIO_RISK_REGISTRY", address(0));
+
         // Input parameters from environment variables
         string memory propertyAddress = vm.envOr("PROPERTY_ADDRESS", string("Unknown Property"));
         uint256 assetValue = vm.envUint("ASSET_VALUE");
         address originator = vm.envAddress("ORIGINATOR");
+        uint256 loanProductRaw = vm.envOr("LOAN_PRODUCT", uint256(1)); // Default: BRIDGE
+        bytes32 segmentId = vm.envOr("SEGMENT_ID", bytes32(0)); // Optional portfolio segment
         
         require(originator != address(0), "Originator address is required");
 
@@ -112,6 +119,22 @@ contract TokenizeAsset is Script {
         // 8. Configure Lending Pool
         lendingPool.setAssetToken(assetId, address(token));
         lendingPool.setAssetLogic(assetId, address(logic));
+
+        // 8.1 Configure Underwriting V2 loan product (optional but recommended)
+        if (underwritingV2Address != address(0)) {
+            require(loanProductRaw > 0 && loanProductRaw <= uint256(type(uint8).max), "Invalid loan product");
+            UnderwritingRegistryV2(underwritingV2Address).setAssetLoanProduct(
+                assetId,
+                UnderwritingPolicyTypes.LoanProduct(uint8(loanProductRaw))
+            );
+            console.log("Configured V2 loan product:", loanProductRaw);
+        }
+
+        // 8.2 Configure Portfolio Risk segment (optional)
+        if (portfolioRiskRegistryAddress != address(0) && segmentId != bytes32(0)) {
+            PortfolioRiskRegistry(portfolioRiskRegistryAddress).assignAssetSegment(assetId, segmentId);
+            console.log("Assigned portfolio segment for asset");
+        }
 
         // 9. Mint shares to the originator
         // Mint amount is equal to the asset value (1 token per $1 of value)

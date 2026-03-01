@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useAccount } from "wagmi";
 import { TxState } from "@/lib/tx";
-import { parseUnits } from "viem";
+import { keccak256, parseUnits, stringToHex } from "viem";
 
 type Props = {
   onTokenized: (assetId: string) => void;
@@ -15,7 +15,19 @@ export default function TokenizationWizard({ onTokenized, onTxStateChange }: Pro
   const [propertyAddress, setPropertyAddress] = useState("");
   const [assetValue, setAssetValue] = useState("");
   const [rentAmount, setRentAmount] = useState("");
+  const [loanProduct, setLoanProduct] = useState("1");
+  const [segmentLabel, setSegmentLabel] = useState("");
+  const [segmentId, setSegmentId] = useState("");
   const [isTokenizing, setIsTokenizing] = useState(false);
+
+  const generateSegmentId = () => {
+    const normalized = segmentLabel.trim().toUpperCase().replace(/\s+/g, "_");
+    if (!normalized) {
+      onTxStateChange({ phase: "failed", message: "Enter a segment label first (e.g. CORE_MIAMI)." });
+      return;
+    }
+    setSegmentId(keccak256(stringToHex(normalized)));
+  };
 
   const handleTokenize = async () => {
     if (!isConnected || !address) {
@@ -47,6 +59,8 @@ export default function TokenizationWizard({ onTokenized, onTxStateChange }: Pro
           assetValue: valueWei,
           rentAmount: rentWei,
           borrowerAddress: address,
+          loanProduct: Number(loanProduct),
+          segmentId: segmentId || undefined,
         }),
       });
 
@@ -66,6 +80,9 @@ export default function TokenizationWizard({ onTokenized, onTxStateChange }: Pro
       setPropertyAddress("");
       setAssetValue("");
       setRentAmount("");
+      setLoanProduct("1");
+      setSegmentLabel("");
+      setSegmentId("");
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : "Tokenization failed";
       onTxStateChange({ phase: "failed", message });
@@ -90,7 +107,7 @@ export default function TokenizationWizard({ onTokenized, onTxStateChange }: Pro
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-[1.5fr,1fr,1fr,auto]">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-[1.4fr,1fr,1fr,1fr,1.2fr,auto]">
         <input
           className="rounded-xl border px-4 py-3 text-sm focus:border-black focus:outline-none"
           placeholder="Property Address (e.g., Miami, FL)"
@@ -112,6 +129,40 @@ export default function TokenizationWizard({ onTokenized, onTxStateChange }: Pro
           type="number"
           value={rentAmount}
           onChange={(e) => setRentAmount(e.target.value)}
+          disabled={isTokenizing}
+        />
+        <select
+          className="rounded-xl border px-4 py-3 text-sm focus:border-black focus:outline-none"
+          value={loanProduct}
+          onChange={(e) => setLoanProduct(e.target.value)}
+          disabled={isTokenizing}
+        >
+          <option value="1">Bridge (V2 Product)</option>
+          <option value="2">Stabilized Term</option>
+          <option value="3">Construction Lite</option>
+        </select>
+        <div className="flex gap-2">
+          <input
+            className="w-full rounded-xl border px-4 py-3 text-sm focus:border-black focus:outline-none"
+            placeholder="Segment Label (e.g. CORE_MIAMI)"
+            value={segmentLabel}
+            onChange={(e) => setSegmentLabel(e.target.value)}
+            disabled={isTokenizing}
+          />
+          <button
+            onClick={generateSegmentId}
+            type="button"
+            disabled={isTokenizing}
+            className="rounded-xl border px-4 py-3 text-xs font-semibold uppercase tracking-wide text-[color:var(--ink-700)] transition hover:bg-gray-50 disabled:opacity-50"
+          >
+            Generate
+          </button>
+        </div>
+        <input
+          className="rounded-xl border px-4 py-3 text-sm focus:border-black focus:outline-none"
+          placeholder="Segment ID (bytes32, optional)"
+          value={segmentId}
+          onChange={(e) => setSegmentId(e.target.value)}
           disabled={isTokenizing}
         />
         <button

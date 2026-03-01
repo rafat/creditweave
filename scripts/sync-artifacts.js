@@ -10,9 +10,12 @@ const CRE_DIR = path.join(ROOT, 'cre', 'my-workflow');
 
 const CONTRACT_NAMES = [
     'UnderwritingRegistry',
+    'UnderwritingRegistryV2',
     'NAVOracle',
     'RWALendingPool',
     'RWAAssetRegistry',
+    'PortfolioRiskRegistry',
+    'LossWaterfall',
     'InvestorShareToken',
     'MockERC20'
 ];
@@ -73,7 +76,11 @@ function sync() {
         const configPath = path.join(CRE_DIR, `config.${env}.json`);
         if (fs.existsSync(configPath)) {
             const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-            config.underwritingRegistryAddress = deployments.underwritingRegistry;
+            const hasV2 = Boolean(deployments.underwritingRegistryV2);
+            config.underwritingRegistryAddress = hasV2
+                ? deployments.underwritingRegistryV2
+                : deployments.underwritingRegistry;
+            config.underwritingRegistryVersion = hasV2 ? 'v2' : 'v1';
             config.navOracleAddress = deployments.navOracle;
             config.lendingPoolAddress = deployments.lendingPool;
             config.rwaAssetRegistryAddress = deployments.rwaAssetRegistry;

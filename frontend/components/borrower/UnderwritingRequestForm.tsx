@@ -3,7 +3,11 @@
 import { useState, useMemo } from "react";
 import { parseUnits } from "viem";
 import { useAccount, useChainId, useWriteContract } from "wagmi";
-import { CONTRACTS, UNDERWRITING_REGISTRY_ABI } from "@/lib/contracts";
+import {
+  CONTRACTS,
+  UNDERWRITING_REGISTRY_ABI,
+  UNDERWRITING_REGISTRY_V2_ABI,
+} from "@/lib/contracts";
 import { normalizeTxError, type TxState } from "@/lib/tx";
 import { SUPPORTED_CHAIN_ID } from "@/lib/wagmi";
 
@@ -39,6 +43,7 @@ export default function UnderwritingRequestForm({
   const currentChainId = useChainId();
   const { writeContractAsync } = useWriteContract();
   const contracts = CONTRACTS[SUPPORTED_CHAIN_ID];
+  const underwritingAddress = contracts.activeUnderwritingRegistry;
 
   const [loanPurpose, setLoanPurpose] = useState("Expansion");
 
@@ -81,8 +86,8 @@ export default function UnderwritingRequestForm({
 
       const hash = await writeContractAsync({
         chainId: SUPPORTED_CHAIN_ID,
-        address: contracts.underwritingRegistry,
-        abi: UNDERWRITING_REGISTRY_ABI,
+        address: underwritingAddress,
+        abi: contracts.usesUnderwritingV2 ? UNDERWRITING_REGISTRY_V2_ABI : UNDERWRITING_REGISTRY_ABI,
         functionName: "requestUnderwriting",
         args: [assetId, intendedBorrowAmount],
       });

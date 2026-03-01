@@ -1,11 +1,13 @@
 import { useMemo, useState } from "react";
-import { formatUnits, parseUnits } from "viem";
+import { formatUnits, parseUnits, zeroAddress } from "viem";
 import { useAccount, useChainId, useReadContract, useWriteContract } from "wagmi";
 import {
   CONTRACTS,
   LENDING_POOL_ABI,
   NAV_ORACLE_ABI,
+  PORTFOLIO_RISK_REGISTRY_ABI,
   RWA_ASSET_REGISTRY_ABI,
+  UNDERWRITING_REGISTRY_V2_ABI,
   ERC20_ABI,
 } from "@/lib/contracts";
 import { normalizeTxError, type TxState } from "@/lib/tx";
@@ -31,6 +33,9 @@ const ASSET_STATUSES = [
   "EXPIRED",
 ] as const;
 
+const APPROVED_CONDITIONAL_STATUS = 1;
+const WATCHLIST_STATUS = 2;
+
 const toBigInt = (value: string): bigint | null => {
   try {
     return BigInt(value);
@@ -52,18 +57,21 @@ export default function BorrowForm({ assetIdInput, terms, onTxStateChange }: Pro
   const { address, isConnected } = useAccount();
   const chainId = useChainId();
   const { writeContractAsync } = useWriteContract();
+  const borrowerArg = (address ?? zeroAddress) as `0x${string}`;
 
   const [borrowAmountInput, setBorrowAmountInput] = useState("");
   const [depositAmountInput, setDepositAmountInput] = useState("");
   const [repayAmountInput, setRepayAmountInput] = useState("");
   const contracts = CONTRACTS[SUPPORTED_CHAIN_ID];
   const assetId = useMemo(() => toBigInt(assetIdInput), [assetIdInput]);
+  const assetIdArg = assetId ?? 0n;
 
   const approved = terms?.[0] ?? false;
   const maxLtvBps = terms?.[1] ?? 0;
   const creditLimit = terms?.[3] ?? 0n;
   const expiry = terms?.[4] ?? 0n;
   const isExpired = expiry > 0n && expiry <= BigInt(Math.floor(Date.now() / 1000));
+  const underwritingV2Address = contracts.underwritingRegistryV2 ?? contracts.activeUnderwritingRegistry;
 
   // 1. Read Token Address for this Asset
   const tokenAddrRead = useReadContract({
@@ -197,6 +205,79 @@ export default function BorrowForm({ assetIdInput, terms, onTxStateChange }: Pro
     },
   });
 
+  const v2DecisionRead = useReadContract({
+    chainId: SUPPORTED_CHAIN_ID,
+    address: underwritingV2Address,
+    abi: UNDERWRITING_REGISTRY_V2_ABI,
+    functionName: "getDecision",
+    args: [borrowerArg, assetIdArg],
+    query: {
+      enabled: Boolean(contracts.usesUnderwritingV2 && address && assetId !== null && chainId === SUPPORTED_CHAIN_ID),
+      refetchInterval: 5000,
+    },
+  });
+
+  const v2EffectiveLtvRead = useReadContract({
+    chainId: SUPPORTED_CHAIN_ID,
+    address: underwritingV2Address,
+    abi: UNDERWRITING_REGISTRY_V2_ABI,
+    functionName: "effectiveMaxLtvBps",
+    args: [borrowerArg, assetIdArg],
+    query: {
+      enabled: Boolean(contracts.usesUnderwritingV2 && address && assetId !== null && chainId === SUPPORTED_CHAIN_ID),
+      refetchInterval: 5000,
+    },
+  });
+
+  const poolPortfolioRiskRead = useReadContract({
+    chainId: SUPPORTED_CHAIN_ID,
+    address: contracts.lendingPool,
+    abi: LENDING_POOL_ABI,
+    functionName: "portfolioRiskRegistry",
+    query: {
+      enabled: Boolean(chainId === SUPPORTED_CHAIN_ID),
+      refetchInterval: 10000,
+    },
+  });
+
+  const portfolioRiskRegistryAddress = (
+    contracts.portfolioRiskRegistry ||
+    (poolPortfolioRiskRead.data as `0x${string}` | undefined)
+  ) as `0x${string}` | undefined;
+  const hasPortfolioRiskRegistry =
+    Boolean(portfolioRiskRegistryAddress) && portfolioRiskRegistryAddress !== zeroAddress;
+
+  const segmentIdRead = useReadContract({
+    chainId: SUPPORTED_CHAIN_ID,
+    address: portfolioRiskRegistryAddress,
+    abi: PORTFOLIO_RISK_REGISTRY_ABI,
+    functionName: "getSegmentForAsset",
+    args: [assetIdArg],
+    query: {
+      enabled: Boolean(hasPortfolioRiskRegistry && assetId !== null && chainId === SUPPORTED_CHAIN_ID),
+      refetchInterval: 10000,
+    },
+  });
+
+  const segmentId = segmentIdRead.data as `0x${string}` | undefined;
+  const hasAssignedSegment = Boolean(segmentId && !/^0x0+$/.test(segmentId));
+
+  const segmentConfigRead = useReadContract({
+    chainId: SUPPORTED_CHAIN_ID,
+    address: portfolioRiskRegistryAddress,
+    abi: PORTFOLIO_RISK_REGISTRY_ABI,
+    functionName: "getSegmentConfig",
+    args: [(segmentId ?? `0x${"0".repeat(64)}`) as `0x${string}`],
+    query: {
+      enabled: Boolean(
+        hasPortfolioRiskRegistry &&
+          hasAssignedSegment &&
+          chainId === SUPPORTED_CHAIN_ID,
+      ),
+      refetchInterval: 10000,
+    },
+  });
+
   const collateralShares = (collateralRead.data as bigint | undefined) ?? 0n;
   const debtPrincipal = ((debtRead.data as [bigint, bigint] | undefined)?.[0] ?? 0n);
   const totalDebt = (totalDebtRead.data as bigint | undefined) ?? 0n;
@@ -212,16 +293,40 @@ export default function BorrowForm({ assetIdInput, terms, onTxStateChange }: Pro
   const assetOriginator = assetCore?.[2] ?? "N/A";
   const registeredAssetValue = assetCore?.[4] ?? 0n;
 
+  const decision = v2DecisionRead.data as { loanProduct?: number; status?: number; 0?: number; 1?: number } | undefined;
+  const loanProduct = Number(decision?.loanProduct ?? decision?.[0] ?? 0);
+  const decisionStatus = Number(decision?.status ?? decision?.[1] ?? 0);
+  const effectiveMaxLtvBps = Number(v2EffectiveLtvRead.data as number | bigint | undefined) || 0;
+  const ltvForCapacityBps =
+    contracts.usesUnderwritingV2 && effectiveMaxLtvBps > 0
+      ? effectiveMaxLtvBps
+      : maxLtvBps;
+
+  const segmentConfig = segmentConfigRead.data as { ltvHaircutBps?: number; 2?: number } | undefined;
+  const segmentHaircutBps = Number(segmentConfig?.ltvHaircutBps ?? segmentConfig?.[2] ?? 0);
+  const hasWatchlistOrConditionalState =
+    decisionStatus === APPROVED_CONDITIONAL_STATUS || decisionStatus === WATCHLIST_STATUS;
+
+  const baseBufferBps =
+    loanProduct === 2 ? 2_000 : // STABILIZED_TERM
+    loanProduct === 1 ? 3_000 : // BRIDGE
+    loanProduct === 3 ? 3_500 : // CONSTRUCTION_LITE
+    2_000; // default
+  const riskAdjustmentBps = (segmentHaircutBps > 0 || hasWatchlistOrConditionalState) ? 1_000 : 0;
+  const dynamicBufferBps = baseBufferBps + riskAdjustmentBps;
+  const dynamicBufferLabel = `${(dynamicBufferBps / 100).toFixed(0)}% BUFFER`;
+
   const collateralValue = (collateralShares * nav) / 10n ** 18n;
-  const collateralCap = (collateralValue * BigInt(maxLtvBps)) / 10_000n;
+  const collateralCap = (collateralValue * BigInt(ltvForCapacityBps)) / 10_000n;
   const maxBorrowFromTerms = (approved && creditLimit > 0n && creditLimit < collateralCap) ? creditLimit : collateralCap;
   const remainingBorrowCapacity =
     maxBorrowFromTerms > debtPrincipal ? maxBorrowFromTerms - debtPrincipal : 0n;
 
   // Safe deposit math
-  const minRequiredCollateralValue = maxLtvBps > 0 ? (creditLimit * 10000n) / BigInt(maxLtvBps) : 0n;
+  const minRequiredCollateralValue = ltvForCapacityBps > 0 ? (creditLimit * 10000n) / BigInt(ltvForCapacityBps) : 0n;
   const minRequiredSharesWei = nav > 0n ? (minRequiredCollateralValue * 10n**18n) / nav : 0n;
-  const safeDepositSharesRaw = (minRequiredSharesWei * 120n) / 100n; // 20% buffer
+  const safeDepositSharesRaw =
+    (minRequiredSharesWei * BigInt(10_000 + dynamicBufferBps)) / 10_000n;
   
   const ONE_SHARE = 10n**18n;
   // Round up to the nearest whole share for clean UX
@@ -440,7 +545,7 @@ export default function BorrowForm({ assetIdInput, terms, onTxStateChange }: Pro
                   onClick={handleSafeDeposit}
                   disabled={targetAdditionalDeposit === 0n || walletBalance === 0n || !approved}
                   className="rounded-lg bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-600 hover:bg-blue-100 disabled:opacity-50 disabled:cursor-not-allowed transition border border-blue-200/50"
-                  title="Target full credit limit + 20% safety buffer"
+                  title="Target full credit limit + dynamic safety buffer based on product and risk state"
                 >
                   SAFE
                 </button>
@@ -508,7 +613,7 @@ export default function BorrowForm({ assetIdInput, terms, onTxStateChange }: Pro
                <div className="flex justify-between border-t pt-1 mt-1">
                  <span className="text-gray-500 flex items-center gap-1">
                    Optimal Target 
-                   <span className="rounded bg-blue-100 text-blue-700 px-1 py-0.5 text-[9px] font-bold">20% BUFFER</span>
+                   <span className="rounded bg-blue-100 text-blue-700 px-1 py-0.5 text-[9px] font-bold">{dynamicBufferLabel}</span>
                  </span>
                  <span className="font-semibold text-gray-900">{formatToken(safeDepositShares)} RWA Shares</span>
                </div>
@@ -563,7 +668,7 @@ export default function BorrowForm({ assetIdInput, terms, onTxStateChange }: Pro
 
         <div className="mt-5 space-y-2 text-sm border-t pt-4">
           <div className="flex justify-between font-medium">
-            <span>Borrowing Capacity (LTV {maxLtvBps / 100}%)</span>
+            <span>Borrowing Capacity (Effective LTV {ltvForCapacityBps / 100}%)</span>
             <span className="text-green-600">${formatCurrency(maxBorrowFromTerms)}</span>
           </div>
           <div className="flex justify-between text-gray-500 text-xs">

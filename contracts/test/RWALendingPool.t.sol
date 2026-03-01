@@ -206,6 +206,39 @@ contract RWALendingPoolTest is Test {
 
     }
 
+    function testRepayOverpaymentCapsTransferToOutstandingDebt() public {
+        navOracle.setNAV(1, 1000 ether);
+        navOracle.setIsFresh(1, true);
+
+        underwriting.setTerms(
+            true,
+            5000,
+            0,
+            block.timestamp + 10 days
+        );
+
+        vm.prank(borrower);
+        pool.depositCollateral(1, 1000 ether);
+
+        vm.prank(borrower);
+        pool.borrow(1, 500 ether);
+
+        uint256 borrowerBalBefore = stable.balanceOf(borrower);
+        uint256 poolBalBefore = stable.balanceOf(address(pool));
+
+        vm.prank(borrower);
+        pool.repay(1, 2_000 ether); // Overpay attempt
+
+        uint256 borrowerBalAfter = stable.balanceOf(borrower);
+        uint256 poolBalAfter = stable.balanceOf(address(pool));
+        (uint256 principal,) = pool.debt(borrower, 1);
+
+        // Only 500 debt should be transferred, not full 2,000.
+        assertEq(borrowerBalBefore - borrowerBalAfter, 500 ether);
+        assertEq(poolBalAfter - poolBalBefore, 500 ether);
+        assertEq(principal, 0);
+    }
+
     // ------------------------------------------------------------
     // Liquidation
     // ------------------------------------------------------------

@@ -1,12 +1,18 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { formatUnits, zeroAddress } from "viem";
 import { useReadContract } from "wagmi";
 import { CONTRACTS, ERC20_ABI, LENDING_POOL_ABI } from "@/lib/contracts";
 import { SUPPORTED_CHAIN_ID } from "@/lib/wagmi";
 
 export default function PoolOverview() {
+  const [mounted, setMounted] = useState(false);
   const contracts = CONTRACTS[SUPPORTED_CHAIN_ID];
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   const stablecoinRead = useReadContract({
     chainId: SUPPORTED_CHAIN_ID,
@@ -26,12 +32,63 @@ export default function PoolOverview() {
     args: [contracts.lendingPool],
     query: {
       enabled: stablecoinAddress !== zeroAddress,
-      refetchInterval: 12_000,
+      refetchInterval: 300_000, // 5 minutes
     },
   });
 
   const poolLiquidity = (liquidityRead.data as bigint | undefined) ?? 0n;
   const poolLiquidityDisplay = formatUnits(poolLiquidity, 18);
+
+  const reserveBalanceRead = useReadContract({
+    chainId: SUPPORTED_CHAIN_ID,
+    address: contracts.lendingPool,
+    abi: LENDING_POOL_ABI,
+    functionName: "reserveBalance",
+    query: { refetchInterval: 60_000 },
+  });
+
+  const reserveFactorRead = useReadContract({
+    chainId: SUPPORTED_CHAIN_ID,
+    address: contracts.lendingPool,
+    abi: LENDING_POOL_ABI,
+    functionName: "reserveFactorBps",
+    query: { refetchInterval: 60_000 },
+  });
+
+  const protocolLossRead = useReadContract({
+    chainId: SUPPORTED_CHAIN_ID,
+    address: contracts.lendingPool,
+    abi: LENDING_POOL_ABI,
+    functionName: "totalProtocolLoss",
+    query: { refetchInterval: 60_000 },
+  });
+
+  const underwritingV2Read = useReadContract({
+    chainId: SUPPORTED_CHAIN_ID,
+    address: contracts.lendingPool,
+    abi: LENDING_POOL_ABI,
+    functionName: "underwritingRegistryV2",
+    query: { refetchInterval: 60_000 },
+  });
+
+  const portfolioRiskRead = useReadContract({
+    chainId: SUPPORTED_CHAIN_ID,
+    address: contracts.lendingPool,
+    abi: LENDING_POOL_ABI,
+    functionName: "portfolioRiskRegistry",
+    query: { refetchInterval: 60_000 },
+  });
+
+  const lossWaterfallRead = useReadContract({
+    chainId: SUPPORTED_CHAIN_ID,
+    address: contracts.lendingPool,
+    abi: LENDING_POOL_ABI,
+    functionName: "lossWaterfall",
+    query: { refetchInterval: 60_000 },
+  });
+
+  if (!mounted) return null;
+
   const isLoading = stablecoinRead.isLoading || liquidityRead.isLoading;
   const isError = stablecoinRead.isError || liquidityRead.isError;
   const errorMessage = stablecoinRead.error?.message ?? liquidityRead.error?.message;
@@ -58,6 +115,34 @@ export default function PoolOverview() {
           <p className="mono mt-2 text-xs">{stablecoinAddress}</p>
           <p className="mt-1 text-xs text-[color:var(--ink-700)]">
             Read from `RWALendingPool.stablecoin()`
+          </p>
+        </article>
+        <article className="rounded-xl border p-4">
+          <p className="mono text-xs text-[color:var(--ink-700)]">RESERVE BALANCE</p>
+          <p className="mt-2 text-2xl font-semibold">
+            {formatUnits((reserveBalanceRead.data as bigint | undefined) ?? 0n, 18)}
+          </p>
+          <p className="mt-1 text-xs text-[color:var(--ink-700)]">
+            Reserve factor: {Number(reserveFactorRead.data ?? 0n) / 100}%
+          </p>
+        </article>
+        <article className="rounded-xl border p-4">
+          <p className="mono text-xs text-[color:var(--ink-700)]">TOTAL PROTOCOL LOSS</p>
+          <p className="mt-2 text-2xl font-semibold">
+            {formatUnits((protocolLossRead.data as bigint | undefined) ?? 0n, 18)}
+          </p>
+          <p className="mt-1 text-xs text-[color:var(--ink-700)]">Post-liquidation unresolved losses</p>
+        </article>
+        <article className="rounded-xl border p-4">
+          <p className="mono text-xs text-[color:var(--ink-700)]">V2 RISK ADAPTERS</p>
+          <p className="mono mt-2 text-xs break-all">
+            UW V2: {String((underwritingV2Read.data as `0x${string}` | undefined) ?? zeroAddress)}
+          </p>
+          <p className="mono mt-2 text-xs break-all">
+            Portfolio: {String((portfolioRiskRead.data as `0x${string}` | undefined) ?? zeroAddress)}
+          </p>
+          <p className="mono mt-2 text-xs break-all">
+            Waterfall: {String((lossWaterfallRead.data as `0x${string}` | undefined) ?? zeroAddress)}
           </p>
         </article>
       </div>

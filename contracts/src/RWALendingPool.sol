@@ -10,6 +10,21 @@ import "./UnderwritingRegistry.sol";
 import "./NAVOracle.sol";
 import "./interface/ICashFlowLogic.sol";
 
+interface IUnderwritingRegistryV2Adapter {
+    function isApproved(address borrower, uint256 assetId) external view returns (bool);
+    function isBorrowBlocked(address borrower, uint256 assetId) external view returns (bool);
+    function getBorrowingTerms(address borrower, uint256 assetId)
+        external
+        view
+        returns (uint16 maxLtvBps, uint16 rateBps, uint256 creditLimit, uint256 expiry);
+    function effectiveMaxLtvBps(address borrower, uint256 assetId) external view returns (uint16);
+}
+
+interface IPortfolioRiskRegistryAdapter {
+    function isBorrowAllowed(uint256 assetId) external view returns (bool);
+    function applySegmentHaircut(uint256 assetId, uint16 baseLtvBps) external view returns (uint16);
+}
+
 contract RWALendingPool is ReentrancyGuard, Ownable {
     using SafeERC20 for IERC20;
 
@@ -20,6 +35,8 @@ contract RWALendingPool is ReentrancyGuard, Ownable {
     IERC20 public immutable stablecoin;
     UnderwritingRegistry public immutable registry;
     NAVOracle public immutable navOracle;
+    address public underwritingRegistryV2;
+    address public portfolioRiskRegistry;
 
     // ------------------------------------------------------------
     // Storage
@@ -52,6 +69,10 @@ contract RWALendingPool is ReentrancyGuard, Ownable {
 
     uint256 public protocolLiquidationFeeBps = 200; // 2%
     address public treasury;
+    uint16 public reserveFactorBps = 1_000; // 10% of interest into reserve
+    uint256 public reserveBalance;
+    uint256 public totalProtocolLoss;
+    address public lossWaterfall;
 
 
     // ------------------------------------------------------------
@@ -72,6 +93,25 @@ contract RWALendingPool is ReentrancyGuard, Ownable {
     event AssetTokenSet(uint256 indexed assetId, address token);
     event AssetLogicSet(uint256 indexed assetId, address logic);
     event LiquidationBonusUpdated(uint256 oldBonus, uint256 newBonus);
+    event UnderwritingRegistryV2Set(address indexed registryV2);
+    event PortfolioRiskRegistrySet(address indexed portfolioRiskRegistry);
+    event ReserveFactorUpdated(uint16 oldReserveFactorBps, uint16 newReserveFactorBps);
+    event InterestAccrued(
+        address indexed user,
+        uint256 indexed assetId,
+        uint256 grossInterest,
+        uint256 reserveCut,
+        uint256 lenderInterest
+    );
+    event ReserveWithdrawn(address indexed to, uint256 amount);
+    event LossRecorded(
+        address indexed user,
+        uint256 indexed assetId,
+        uint256 badDebt,
+        uint256 reserveUsed,
+        uint256 outstandingLoss
+    );
+    event LossWaterfallSet(address indexed lossWaterfall);
 
     // ------------------------------------------------------------
     // Constructor
@@ -141,7 +181,25 @@ contract RWALendingPool is ReentrancyGuard, Ownable {
         uint256 amount
     ) external nonReentrant {
         require(amount > 0, "Invalid borrow");
-        require(registry.isApproved(msg.sender, assetId), "Not approved");
+
+        if (underwritingRegistryV2 != address(0)) {
+            require(
+                IUnderwritingRegistryV2Adapter(underwritingRegistryV2).isApproved(msg.sender, assetId),
+                "Not approved"
+            );
+            require(
+                !IUnderwritingRegistryV2Adapter(underwritingRegistryV2).isBorrowBlocked(msg.sender, assetId),
+                "Borrow blocked by covenants"
+            );
+        } else {
+            require(registry.isApproved(msg.sender, assetId), "Not approved");
+        }
+        if (portfolioRiskRegistry != address(0)) {
+            require(
+                IPortfolioRiskRegistryAdapter(portfolioRiskRegistry).isBorrowAllowed(assetId),
+                "Segment borrow paused"
+            );
+        }
 
         _accrue(msg.sender, assetId);
 
@@ -180,16 +238,17 @@ contract RWALendingPool is ReentrancyGuard, Ownable {
         uint256 userDebt = position.principal;
         require(userDebt > 0, "No debt");
 
-        stablecoin.safeTransferFrom(msg.sender, address(this), amount);
+        uint256 actualRepay = amount > userDebt ? userDebt : amount;
+        stablecoin.safeTransferFrom(msg.sender, address(this), actualRepay);
 
-        if (amount >= userDebt) {
+        if (actualRepay >= userDebt) {
             position.principal = 0;
             position.lastAccrued = block.timestamp;
         } else {
-            position.principal -= amount;
+            position.principal -= actualRepay;
         }
 
-        emit Repaid(msg.sender, assetId, amount);
+        emit Repaid(msg.sender, assetId, actualRepay);
     }
 
     // ============================================================
@@ -278,6 +337,15 @@ contract RWALendingPool is ReentrancyGuard, Ownable {
         IERC20(token).safeTransfer(msg.sender, liquidatorShares);
         IERC20(token).safeTransfer(treasury, protocolShares);
 
+        // If collateral is exhausted but debt remains, record bad debt.
+        if (
+            collateral[user][assetId] == 0 &&
+            position.principal > 0 &&
+            (reserveBalance > 0 || lossWaterfall != address(0))
+        ) {
+            _recordBadDebt(user, assetId, position);
+        }
+
         emit Liquidated(user, assetId, repayAmount, totalShares);
     }
 
@@ -320,12 +388,29 @@ contract RWALendingPool is ReentrancyGuard, Ownable {
         address user,
         uint256 assetId
     ) internal view returns (uint256) {
-        (, uint16 underwritingLtv, , uint256 creditLimit, , ) =
-            registry.getTerms(user, assetId);
+        if (underwritingRegistryV2 != address(0)) {
+            if (!IUnderwritingRegistryV2Adapter(underwritingRegistryV2).isApproved(user, assetId)) {
+                return 0;
+            }
 
-        if (!registry.isApproved(user, assetId)) {
-            return 0;
+            (
+                ,
+                ,
+                uint256 creditLimitV2,
+                
+            ) = IUnderwritingRegistryV2Adapter(underwritingRegistryV2).getBorrowingTerms(user, assetId);
+
+            uint16 effectiveLtvV2 =
+                IUnderwritingRegistryV2Adapter(underwritingRegistryV2).effectiveMaxLtvBps(user, assetId);
+
+            uint256 effectiveLtvResolved = _effectiveLTV(assetId, effectiveLtvV2);
+            uint256 collateralCapV2 =
+                (_collateralValue(user, assetId) * effectiveLtvResolved) / 10_000;
+            return collateralCapV2 < creditLimitV2 ? collateralCapV2 : creditLimitV2;
         }
+
+        (, uint16 underwritingLtv, , uint256 creditLimit, , ) = registry.getTerms(user, assetId);
+        if (!registry.isApproved(user, assetId)) return 0;
 
         uint256 effectiveLTV =
             _effectiveLTV(assetId, underwritingLtv);
@@ -342,9 +427,17 @@ contract RWALendingPool is ReentrancyGuard, Ownable {
     ) internal view returns (uint256) {
         uint256 healthCap = _assetHealthCap(assetId);
 
-        return underwritingLtv < healthCap
+        uint16 baseLtv = underwritingLtv < healthCap
             ? underwritingLtv
-            : healthCap;
+            : uint16(healthCap);
+
+        if (portfolioRiskRegistry != address(0)) {
+            return IPortfolioRiskRegistryAdapter(portfolioRiskRegistry).applySegmentHaircut(
+                assetId,
+                baseLtv
+            );
+        }
+        return baseLtv;
     }
 
     function _assetHealthCap(
@@ -388,7 +481,12 @@ contract RWALendingPool is ReentrancyGuard, Ownable {
             return;
         }
 
-        ( , , uint16 rateBps, , , ) = registry.getTerms(user, assetId);
+        uint16 rateBps;
+        if (underwritingRegistryV2 != address(0)) {
+            (, rateBps, , ) = IUnderwritingRegistryV2Adapter(underwritingRegistryV2).getBorrowingTerms(user, assetId);
+        } else {
+            ( , , rateBps, , , ) = registry.getTerms(user, assetId);
+        }
 
         uint256 timeElapsed = block.timestamp - position.lastAccrued;
         if (timeElapsed == 0) return;
@@ -397,8 +495,18 @@ contract RWALendingPool is ReentrancyGuard, Ownable {
             (position.principal * rateBps * timeElapsed)
             / (10_000 * YEAR);
 
-        position.principal += interest;
+        if (interest == 0) {
+            position.lastAccrued = block.timestamp;
+            return;
+        }
+
+        uint256 reserveCut = (interest * reserveFactorBps) / 10_000;
+        uint256 lenderInterest = interest - reserveCut;
+        reserveBalance += reserveCut;
+        position.principal += lenderInterest;
         position.lastAccrued = block.timestamp;
+
+        emit InterestAccrued(user, assetId, interest, reserveCut, lenderInterest);
     }
 
     function _debtWithAccrual(address user, uint256 assetId)
@@ -407,7 +515,12 @@ contract RWALendingPool is ReentrancyGuard, Ownable {
         DebtPosition memory position = debt[user][assetId];
         if (position.principal == 0) return 0;
 
-        ( , , uint16 rateBps, , , ) = registry.getTerms(user, assetId);
+        uint16 rateBps;
+        if (underwritingRegistryV2 != address(0)) {
+            (, rateBps, , ) = IUnderwritingRegistryV2Adapter(underwritingRegistryV2).getBorrowingTerms(user, assetId);
+        } else {
+            ( , , rateBps, , , ) = registry.getTerms(user, assetId);
+        }
 
         uint256 timeElapsed = block.timestamp - position.lastAccrued;
 
@@ -415,7 +528,9 @@ contract RWALendingPool is ReentrancyGuard, Ownable {
             (position.principal * rateBps * timeElapsed)
             / (10_000 * YEAR);
 
-        return position.principal + interest;
+        uint256 reserveCut = (interest * reserveFactorBps) / 10_000;
+        uint256 lenderInterest = interest - reserveCut;
+        return position.principal + lenderInterest;
     }
 
     function getDebtWithAccrual(address user, uint256 assetId)
@@ -469,10 +584,68 @@ contract RWALendingPool is ReentrancyGuard, Ownable {
         protocolLiquidationFeeBps = newFeeBps;
     }
 
+    function setReserveFactor(uint16 newReserveFactorBps) external onlyOwner {
+        require(newReserveFactorBps <= 5_000, "Reserve too high");
+        uint16 old = reserveFactorBps;
+        reserveFactorBps = newReserveFactorBps;
+        emit ReserveFactorUpdated(old, newReserveFactorBps);
+    }
+
+    function withdrawReserve(address to, uint256 amount) external onlyOwner {
+        require(to != address(0), "Invalid recipient");
+        require(amount <= reserveBalance, "Insufficient reserve");
+        reserveBalance -= amount;
+        stablecoin.safeTransfer(to, amount);
+        emit ReserveWithdrawn(to, amount);
+    }
+
     function setTreasury(address _treasury) external onlyOwner {
-        require(treasury != address(0), "No treasury");
+        require(_treasury != address(0), "No treasury");
 
         treasury = _treasury;
+    }
+
+    function setUnderwritingRegistryV2(address registryV2) external onlyOwner {
+        underwritingRegistryV2 = registryV2;
+        emit UnderwritingRegistryV2Set(registryV2);
+    }
+
+    function setPortfolioRiskRegistry(address _portfolioRiskRegistry) external onlyOwner {
+        portfolioRiskRegistry = _portfolioRiskRegistry;
+        emit PortfolioRiskRegistrySet(_portfolioRiskRegistry);
+    }
+
+    function setLossWaterfall(address _lossWaterfall) external onlyOwner {
+        lossWaterfall = _lossWaterfall;
+        emit LossWaterfallSet(_lossWaterfall);
+    }
+
+    function _recordBadDebt(address user, uint256 assetId, DebtPosition storage position) internal {
+        uint256 initialBadDebt = position.principal;
+        uint256 badDebt = initialBadDebt;
+        if (badDebt == 0) return;
+
+        uint256 reserveUsed = badDebt > reserveBalance ? reserveBalance : badDebt;
+        if (reserveUsed > 0) {
+            reserveBalance -= reserveUsed;
+            badDebt -= reserveUsed;
+        }
+
+        if (badDebt > 0 && lossWaterfall != address(0)) {
+            (bool ok, bytes memory data) = lossWaterfall.call(
+                abi.encodeWithSignature("absorbLoss(uint256)", badDebt)
+            );
+            if (ok && data.length >= 96) {
+                (, , uint256 unresolvedLoss) = abi.decode(data, (uint256, uint256, uint256));
+                badDebt = unresolvedLoss;
+            }
+        }
+
+        totalProtocolLoss += badDebt;
+        position.principal = 0;
+        position.lastAccrued = block.timestamp;
+
+        emit LossRecorded(user, assetId, initialBadDebt, reserveUsed, badDebt);
     }
 
 }

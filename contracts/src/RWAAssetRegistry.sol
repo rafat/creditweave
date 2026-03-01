@@ -361,6 +361,14 @@ contract RWAAssetRegistry is AccessControl, Pausable, ReentrancyGuard {
         emit OracleAdded(_oracle);
     }
 
+    function pause() external onlyRole(EMERGENCY_ADMIN_ROLE) {
+        _pause();
+    }
+
+    function unpause() external onlyRole(EMERGENCY_ADMIN_ROLE) {
+        _unpause();
+    }
+
     function pauseAsset(uint256 _assetId) external onlyRole(EMERGENCY_ADMIN_ROLE) {
         RealWorldAsset storage asset = assets[_assetId];
         require(asset.assetId != 0, "Asset does not exist");
