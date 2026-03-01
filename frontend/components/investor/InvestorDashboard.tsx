@@ -1,8 +1,10 @@
 "use client";
 
 import AssetOverview from "@/components/investor/AssetOverview";
+import InvestorAlertBar from "@/components/investor/InvestorAlertBar";
 import PoolOverview from "@/components/investor/PoolOverview";
 import RecentUnderwritingOutcomes from "@/components/investor/RecentUnderwritingOutcomes";
+import SegmentRiskDashboard from "@/components/investor/SegmentRiskDashboard";
 import AppNav from "@/components/AppNav";
 import WalletBar from "@/components/WalletBar";
 
@@ -25,6 +27,8 @@ export default function InvestorDashboard() {
         </p>
       </section>
 
+      <InvestorAlertBar />
+      <SegmentRiskDashboard />
       <PoolOverview />
       <AssetOverview />
       <RecentUnderwritingOutcomes />
