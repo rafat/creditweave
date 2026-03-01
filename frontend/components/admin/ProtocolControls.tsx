@@ -1,16 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { formatUnits, parseUnits, isAddress } from "viem";
-import { useAccount, useChainId, useReadContract, useWriteContract } from "wagmi";
+import { useState } from "react";
+import { isAddress } from "viem";
+import { useAccount, useReadContract, useWriteContract } from "wagmi";
 import { CONTRACTS, LENDING_POOL_ABI, NAV_ORACLE_ABI, RWA_ASSET_REGISTRY_ABI } from "@/lib/contracts";
 import { SUPPORTED_CHAIN_ID } from "@/lib/wagmi";
 import { normalizeTxError } from "@/lib/tx";
 
 export default function ProtocolControls() {
-  const [mounted, setMounted] = useState(false);
   const { address } = useAccount();
-  const chainId = useChainId();
   const contracts = CONTRACTS[SUPPORTED_CHAIN_ID];
   const { writeContractAsync } = useWriteContract();
 
@@ -22,10 +20,6 @@ export default function ProtocolControls() {
   const [kycAddress, setKycAddress] = useState("");
   const [whitelistAddress, setWhitelistAddress] = useState("");
   const [pauseAssetId, setPauseAssetId] = useState("");
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
 
   // --- Read Current Values ---
   const bonusRead = useReadContract({
@@ -71,8 +65,6 @@ export default function ProtocolControls() {
   });
 
   const isOwner = isOwnerRead.data === address;
-
-  if (!mounted) return null;
 
   const handleUpdateBonus = async () => {
     try {

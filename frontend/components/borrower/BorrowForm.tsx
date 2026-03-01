@@ -6,7 +6,6 @@ import {
   LENDING_POOL_ABI,
   NAV_ORACLE_ABI,
   PORTFOLIO_RISK_REGISTRY_ABI,
-  RWA_ASSET_REGISTRY_ABI,
   UNDERWRITING_REGISTRY_V2_ABI,
   ERC20_ABI,
 } from "@/lib/contracts";
@@ -19,19 +18,6 @@ type Props = {
   terms?: TermsTuple;
   onTxStateChange: (tx: TxState) => void;
 };
-
-const ASSET_TYPES = ["REAL_ESTATE", "INVOICE", "BOND", "COMMODITY"] as const;
-const ASSET_STATUSES = [
-  "REGISTERED",
-  "LINKED",
-  "ACTIVE",
-  "UNDER_REVIEW",
-  "DEFAULTED",
-  "LIQUIDATING",
-  "LIQUIDATED",
-  "PAUSED",
-  "EXPIRED",
-] as const;
 
 const APPROVED_CONDITIONAL_STATUS = 1;
 const WATCHLIST_STATUS = 2;
@@ -197,17 +183,6 @@ export default function BorrowForm({ assetIdInput, terms, onTxStateChange }: Pro
     },
   });
 
-  const assetCoreRead = useReadContract({
-    chainId: SUPPORTED_CHAIN_ID,
-    address: contracts.rwaAssetRegistry,
-    abi: RWA_ASSET_REGISTRY_ABI,
-    functionName: "getAssetCore",
-    args: assetId !== null ? [assetId] : undefined,
-    query: {
-      enabled: Boolean(assetId !== null && chainId === SUPPORTED_CHAIN_ID),
-    },
-  });
-
   const v2DecisionRead = useReadContract({
     chainId: SUPPORTED_CHAIN_ID,
     address: underwritingV2Address,
@@ -288,14 +263,6 @@ export default function BorrowForm({ assetIdInput, terms, onTxStateChange }: Pro
 
   const navIsFresh = Boolean(navFreshRead.data);
   const nav = ((navDataRead.data as [bigint, bigint, `0x${string}`] | undefined)?.[0] ?? 0n);
-  const assetCore = assetCoreRead.data as
-    | [bigint, number, `0x${string}`, number, bigint, bigint]
-    | undefined;
-  const assetType = assetCore ? ASSET_TYPES[assetCore[1]] ?? `UNKNOWN(${assetCore[1]})` : "N/A";
-  const assetStatus = assetCore ? ASSET_STATUSES[assetCore[3]] ?? `UNKNOWN(${assetCore[3]})` : "N/A";
-  const assetOriginator = assetCore?.[2] ?? "N/A";
-  const registeredAssetValue = assetCore?.[4] ?? 0n;
-
   const decision = v2DecisionRead.data as { loanProduct?: number; status?: number; 0?: number; 1?: number } | undefined;
   const loanProduct = Number(decision?.loanProduct ?? decision?.[0] ?? 0);
   const decisionStatus = Number(decision?.status ?? decision?.[1] ?? 0);
@@ -646,7 +613,7 @@ export default function BorrowForm({ assetIdInput, terms, onTxStateChange }: Pro
                       i
                     </span>
                     <span className="pointer-events-none absolute bottom-full left-1/2 mb-2 w-48 -translate-x-1/2 rounded-lg bg-gray-800 p-2 text-center text-[10px] font-medium text-white opacity-0 transition-opacity group-hover:opacity-100 z-50 shadow-xl">
-                      Collateral not currently backing active debt. Withdrawing this will reduce your total borrowing capacity but won't trigger liquidation.
+                      Collateral not currently backing active debt. Withdrawing this will reduce your total borrowing capacity but won&apos;t trigger liquidation.
                       <span className="absolute left-1/2 top-full -translate-x-1/2 border-4 border-transparent border-t-gray-800" />
                     </span>
                  </span>

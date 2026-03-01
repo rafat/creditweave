@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState } from "react";
 import { formatUnits, parseUnits } from "viem";
 import { useAccount, useChainId, useWriteContract } from "wagmi";
 import {

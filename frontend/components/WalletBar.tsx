@@ -2,27 +2,19 @@
 
 import { useAccount, useChainId, useConnect, useDisconnect, useSwitchChain } from "wagmi";
 import { SUPPORTED_CHAIN_ID } from "@/lib/wagmi";
-import { useEffect, useState } from "react";
 
 const shortenAddress = (address: string) =>
   `${address.slice(0, 6)}...${address.slice(address.length - 4)}`;
 
 export default function WalletBar() {
-  const [mounted, setMounted] = useState(false);
   const { address, isConnected } = useAccount();
   const chainId = useChainId();
   const { connect, connectors, isPending: isConnectPending } = useConnect();
   const { disconnect } = useDisconnect();
   const { switchChain, isPending: isSwitchPending } = useSwitchChain();
 
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-
   const isWrongNetwork = isConnected && chainId !== SUPPORTED_CHAIN_ID;
   const primaryConnector = connectors[0];
-
-  if (!mounted) return null;
 
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border bg-[color:var(--card)] p-4">

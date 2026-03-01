@@ -257,7 +257,7 @@ export default function RecentUnderwritingOutcomes() {
                                <div>
                                  <p className="text-sm font-semibold text-gray-900 mb-1">Executive Summary</p>
                                  <p className="text-sm text-gray-600 leading-relaxed italic">
-                                   "{explanationMap[row.reasoningHash].summary}"
+                                   &ldquo;{explanationMap[row.reasoningHash].summary}&rdquo;
                                  </p>
                                </div>
                                
