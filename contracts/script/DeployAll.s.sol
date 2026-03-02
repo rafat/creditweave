@@ -44,7 +44,6 @@ contract DeployAll is Script {
         
         // These are empty because no asset is deployed yet
         vm.serializeAddress(json, "logic", address(0));
-        vm.serializeAddress(json, "vault", address(0));
         vm.serializeAddress(json, "token", address(0));
         string memory finalJson = vm.serializeUint(json, "assetId", 0);
         

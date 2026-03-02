@@ -32,6 +32,7 @@ Legacy `UnderwritingRegistry` is retained for compatibility.
 ## End-to-End Flow
 
 1. Borrower tokenizes an asset in frontend (`TokenizationWizard`).
+   - A fixed-supply ERC20 property share token is minted to the originator wallet.
 2. Borrower submits underwriting request onchain.
 3. CRE trigger processes request privately and computes terms.
 4. CRE posts signed V2 report onchain.
@@ -59,12 +60,6 @@ cd ../private-apis && npm install
 
 ### 2) Build/test contracts
 
-```bash
-cd contracts
-forge build
-forge test -vv
-```
-
 copy .env.example to .env
  and add private key, sepolia rpc url etc.
 ```
@@ -72,6 +67,13 @@ SEPOLIA_FORWARDER=0x15fC6ae953E024d975e77382eEeC56A9101f9F88
 PRIVATE_KEY=
 SEPOLIA_RPC=
 ETHERSCAN_API_KEY=
+```
+
+```bash
+cd contracts
+source .env
+forge build
+forge test -vv
 ```
 
 ### 3) Deploy contracts (Sepolia)
@@ -164,4 +166,4 @@ For a tight hackathon demo:
 - Run CRE workflow broadcast
 - Show onchain terms and investor risk panels
 - Borrow, repay, withdraw collateral
-
+- Optional: transfer some property shares to a secondary-holder wallet and show investor transparency view

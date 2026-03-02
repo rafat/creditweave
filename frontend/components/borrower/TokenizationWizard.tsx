@@ -14,7 +14,6 @@ export default function TokenizationWizard({ onTokenized, onTxStateChange }: Pro
   const { address, isConnected } = useAccount();
   const [propertyAddress, setPropertyAddress] = useState("");
   const [assetValue, setAssetValue] = useState("");
-  const [rentAmount, setRentAmount] = useState("");
   const [loanProduct, setLoanProduct] = useState("1");
   const [segmentLabel, setSegmentLabel] = useState("CORE_US_PRIMARY");
   const [segmentId, setSegmentId] = useState<`0x${string}`>(() =>
@@ -40,7 +39,7 @@ export default function TokenizationWizard({ onTokenized, onTxStateChange }: Pro
       return;
     }
 
-    if (!propertyAddress || !assetValue || !rentAmount) {
+    if (!propertyAddress || !assetValue) {
       onTxStateChange({ phase: "failed", message: "Fill in all fields." });
       return;
     }
@@ -50,11 +49,10 @@ export default function TokenizationWizard({ onTokenized, onTxStateChange }: Pro
       onTxStateChange({
         phase: "submitted",
         hash: "0x...", // Fake hash since it's backend-driven
-        message: "Platform is tokenizing asset, deploying logic, and minting shares. This takes ~30 seconds...",
+        message: "Platform is tokenizing asset, deploying logic, and minting fixed-supply property shares. This takes ~30 seconds...",
       });
 
       const valueWei = parseUnits(assetValue, 18).toString(); 
-      const rentWei = parseUnits(rentAmount, 18).toString();
 
       const response = await fetch("/api/rpc/tokenize", {
         method: "POST",
@@ -62,7 +60,6 @@ export default function TokenizationWizard({ onTokenized, onTxStateChange }: Pro
         body: JSON.stringify({
           propertyAddress,
           assetValue: valueWei,
-          rentAmount: rentWei,
           borrowerAddress: address,
           loanProduct: Number(loanProduct),
           segmentId: segmentId || undefined,
@@ -84,7 +81,6 @@ export default function TokenizationWizard({ onTokenized, onTxStateChange }: Pro
       onTokenized(data.assetId.toString());
       setPropertyAddress("");
       setAssetValue("");
-      setRentAmount("");
       setLoanProduct("1");
       applySegmentSelection("CORE_US_PRIMARY");
     } catch (error: unknown) {
@@ -130,17 +126,6 @@ export default function TokenizationWizard({ onTokenized, onTxStateChange }: Pro
             type="number"
             value={assetValue}
             onChange={(e) => setAssetValue(e.target.value)}
-            disabled={isTokenizing}
-          />
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <label className="text-xs font-semibold uppercase tracking-wide text-[color:var(--ink-700)]">Monthly Rent (USD)</label>
-          <input
-            className="rounded-xl border px-4 py-3 text-sm focus:border-black focus:outline-none"
-            placeholder="e.g., 3000"
-            type="number"
-            value={rentAmount}
-            onChange={(e) => setRentAmount(e.target.value)}
             disabled={isTokenizing}
           />
         </div>

@@ -53,7 +53,7 @@ The system operates across three primary layers: the Frontend, the Confidential 
 │  1. Triggers on `UnderwritingRequested` event           │
 │  2. Reads onchain state (NAV, requested amount, loc)    │
 │  3. Fetches confidential HTTP data (Borrower + Asset)   │
-│  4. Runs Institutional DSCR-based risk scoring          │
+│  4. Runs institutional cashflow-risk scoring            │
 │  5. Calls LLM (Expert CRE Officer) for explanation      │
 │  6. Pushes deep qualitative analysis to Private API     │
 │  7. Posts V2 decision struct + provenance hash onchain  │
@@ -87,7 +87,7 @@ The core DeFi primitives are built to trust the CRE's outputs blindly, acting pu
 
 ### 2. Confidential Runtime Environment (CRE) Workflow
 The CRE (`my-workflow/main.ts`) is a secure, offchain worker powered by Chainlink's CRE SDK. It handles the heavy lifting without exposing secrets.
-*   **Institutional DSCR Underwriting Strategy**: The protocol uses the industry-standard **Debt Service Coverage Ratio (DSCR)** for underwriting. It calculates risk tiers based on property rental income versus debt obligations, ensuring institutional-grade credit decisions.
+*   **Institutional Cashflow Underwriting Strategy**: The protocol uses a cashflow-coverage and leverage framework to score risk tiers, combining borrower quality, asset quality, and requested leverage into institutional-style credit decisions.
 *   **Active AI Underwriting Agent**: The LLM (Gemini) acts as an active credit officer. It first generates a structured **Proposal JSON** (Risk Tier, LTV adjustments). This proposal is then passed through a **Deterministic Policy Gate** that enforces "tighten-only" logic and ignores low-confidence results, ensuring the AI influences terms safely.
 *   **Confidential Data Aggregation**: Uses a single consolidated `/api/v1/underwriting/context` call to securely request all borrower financials and asset metrics in one snapshot.
 *   **Versioned Registry Support**: Workflow supports both V1 and V2 registry modes, with V2 as the active mode on Sepolia (`UnderwritingRequested(...,uint8 triggerType)` + V2 decision report encoding).
@@ -128,7 +128,7 @@ What makes CreditWeave actually confidential?
 ## 🧭 Roadmap Progress
 
 *   ✅ **Phase 1**: Contracts + tests (`UnderwritingRegistry`, `NAVOracle`, `RWALendingPool`)
-*   ✅ **Phase 2**: Confidential Underwriting CRE workflow (Institutional DSCR scoring + AI analysis)
+*   ✅ **Phase 2**: Confidential Underwriting CRE workflow (institutional cashflow scoring + AI analysis)
 *   ✅ **Phase 3**: Confidential NAV CRE workflow (Dynamic NAV updates within the underwriting flow)
 *   ✅ **Phase 4**: Add risk monitor agent (Cron job implemented for macro-trend monitoring)
 *   ✅ **Phase 5**: Frontend borrower dashboard (Built with viem/wagmi, integrates deep AI reasoning)

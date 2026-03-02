@@ -20,7 +20,6 @@ contract RWAAssetRegistry is AccessControl, Pausable, ReentrancyGuard {
         address originator;
 
         address logicContract;
-        address vaultContract;
         address tokenContract;
 
         bool isKYCVerified;
@@ -58,7 +57,7 @@ contract RWAAssetRegistry is AccessControl, Pausable, ReentrancyGuard {
     uint256 public liquidationThresholdDays = 60;
 
     event AssetRegistered(uint256 indexed assetId, RWACommonTypes.AssetType assetType, address indexed originator, uint256 assetValue);
-    event ContractsLinked(uint256 indexed assetId, address logicContract, address vaultContract, address tokenContract);
+    event ContractsLinked(uint256 indexed assetId, address logicContract, address tokenContract);
     event AssetActivated(uint256 indexed assetId, uint256 activationDate);
     event PaymentRecorded(uint256 indexed assetId, uint256 paymentAmount, uint256 accumulatedYield, uint256 timestamp);
     event DefaultTriggered(uint256 indexed assetId, uint256 missedPayments, uint256 daysInDefault, uint256 timestamp);
@@ -117,22 +116,19 @@ contract RWAAssetRegistry is AccessControl, Pausable, ReentrancyGuard {
     function linkContracts(
         uint256 _assetId,
         address _logicContract,
-        address _vaultContract,
         address _token
     ) external onlyRole(ASSET_FACTORY_ROLE) nonReentrant {
         RealWorldAsset storage asset = assets[_assetId];
         require(asset.assetId != 0, "Asset does not exist");
         require(asset.currentStatus == RWACommonTypes.AssetStatus.REGISTERED, "Asset not registered");
         require(_logicContract != address(0), "Invalid logic contract");
-        require(_vaultContract != address(0), "Invalid vault contract");
         require(_token != address(0), "Invalid token");
 
         asset.logicContract = _logicContract;
-        asset.vaultContract = _vaultContract;
         asset.tokenContract = _token;
         asset.currentStatus = RWACommonTypes.AssetStatus.LINKED;
 
-        emit ContractsLinked(_assetId, _logicContract, _vaultContract, _token);
+        emit ContractsLinked(_assetId, _logicContract, _token);
     }
 
     function activateAsset(uint256 _assetId) external onlyRole(COMPLIANCE_ROLE) {
@@ -142,7 +138,6 @@ contract RWAAssetRegistry is AccessControl, Pausable, ReentrancyGuard {
         require(asset.currentStatus == RWACommonTypes.AssetStatus.LINKED, "Asset not linked");
         require(asset.isKYCVerified, "KYC not verified");
         require(asset.logicContract != address(0), "Contracts not linked");
-        require(asset.vaultContract != address(0), "Vault not linked");
         require(asset.tokenContract != address(0), "Token not linked");
 
         asset.currentStatus = RWACommonTypes.AssetStatus.ACTIVE;
@@ -456,13 +451,12 @@ contract RWAAssetRegistry is AccessControl, Pausable, ReentrancyGuard {
         view
         returns (
             address logicContract,
-            address vaultContract,
             address tokenContract
         )
     {
         RealWorldAsset storage asset = assets[_assetId];
         require(asset.assetId != 0, "Asset does not exist");
-        return (asset.logicContract, asset.vaultContract, asset.tokenContract);
+        return (asset.logicContract, asset.tokenContract);
     }
 
     /// @notice Frontend-friendly getter for metadata fields

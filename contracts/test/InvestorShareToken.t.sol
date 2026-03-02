@@ -4,23 +4,22 @@ pragma solidity ^0.8.20;
 import "forge-std/Test.sol";
 import "../src/InvestorShareToken.sol";
 import "./mocks/MockRegistry.sol";
-import "./mocks/MockVault.sol";
 
 contract InvestorShareTokenTest is Test {
     InvestorShareToken token;
     MockRegistry registry;
-    MockVault vault;
 
-    address admin = address(1);
-    address user1 = address(2);
-    address user2 = address(3);
+    address user1 = address(1);
+    address user2 = address(2);
 
     uint256 assetId = 1;
     uint256 maxSupply = 1_000_000 ether;
+    uint256 initialSupply = 100 ether;
 
     function setUp() public {
         registry = new MockRegistry();
-        vault = new MockVault();
+        registry.setWhitelisted(user1, true);
+        registry.setWhitelisted(user2, true);
 
         token = new InvestorShareToken(
             assetId,
@@ -28,12 +27,9 @@ contract InvestorShareTokenTest is Test {
             "RWA",
             maxSupply,
             address(registry),
-            address(vault),
-            admin
+            user1,
+            initialSupply
         );
-
-        registry.setWhitelisted(user1, true);
-        registry.setWhitelisted(user2, true);
     }
 
     // -------------------------------------------------
@@ -44,41 +40,8 @@ contract InvestorShareTokenTest is Test {
         assertEq(token.assetId(), assetId);
         assertEq(token.maxSupply(), maxSupply);
         assertEq(token.registry(), address(registry));
-        assertEq(token.vault(), address(vault));
-    }
-
-    // -------------------------------------------------
-    // Minting
-    // -------------------------------------------------
-
-    function testMintSuccess() public {
-        vm.prank(address(vault));
-        token.mint(user1, 100 ether);
-
-        assertEq(token.balanceOf(user1), 100 ether);
-        assertEq(token.totalSupply(), 100 ether);
-    }
-
-    function testMintFailsIfNotWhitelisted() public {
-        address badUser = address(4);
-
-        vm.prank(address(vault));
-        vm.expectRevert("Recipient not whitelisted");
-        token.mint(badUser, 100 ether);
-    }
-
-    function testMintFailsIfSupplyExceeded() public {
-        vm.prank(address(vault));
-        vm.expectRevert("Max supply exceeded");
-        token.mint(user1, maxSupply + 1);
-    }
-
-    function testMintFailsIfDistributionStarted() public {
-        vault.setDistributionStarted(true);
-
-        vm.prank(address(vault));
-        vm.expectRevert("Supply locked");
-        token.mint(user1, 100 ether);
+        assertEq(token.totalSupply(), initialSupply);
+        assertEq(token.balanceOf(user1), initialSupply);
     }
 
     // -------------------------------------------------
@@ -86,20 +49,14 @@ contract InvestorShareTokenTest is Test {
     // -------------------------------------------------
 
     function testTransferSuccess() public {
-        vm.prank(address(vault));
-        token.mint(user1, 100 ether);
-
         vm.prank(user1);
         assertTrue(token.transfer(user2, 50 ether));
 
-        assertEq(token.balanceOf(user1), 50 ether);
+        assertEq(token.balanceOf(user1), initialSupply - 50 ether);
         assertEq(token.balanceOf(user2), 50 ether);
     }
 
     function testTransferFailsIfAssetInactive() public {
-        vm.prank(address(vault));
-        token.mint(user1, 100 ether);
-
         registry.setAssetActive(false);
 
         vm.prank(user1);
@@ -110,9 +67,6 @@ contract InvestorShareTokenTest is Test {
     }
 
     function testTransferFailsIfPaused() public {
-        vm.prank(address(vault));
-        token.mint(user1, 100 ether);
-
         registry.setAssetPaused(true);
 
         vm.prank(user1);
@@ -123,11 +77,6 @@ contract InvestorShareTokenTest is Test {
     }
 
     function testTransferFailsIfSenderNotWhitelisted() public {
-        // First mint while whitelisted
-        vm.prank(address(vault));
-        token.mint(user1, 100 ether);
-
-        // Now remove whitelist
         registry.setWhitelisted(user1, false);
 
         vm.prank(user1);
@@ -143,11 +92,8 @@ contract InvestorShareTokenTest is Test {
     // -------------------------------------------------
 
     function testOwnershipBps() public {
-        vm.prank(address(vault));
-        token.mint(user1, 100 ether);
-
-        vm.prank(address(vault));
-        token.mint(user2, 100 ether);
+        vm.prank(user1);
+        assertTrue(token.transfer(user2, initialSupply / 2));
 
         uint256 bps = token.ownershipBps(user1);
 

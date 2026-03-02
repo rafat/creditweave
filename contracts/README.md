@@ -12,6 +12,7 @@ This folder contains the onchain layer for CreditWeave (Sepolia deployment).
   - optional V2 underwriting adapter
   - optional portfolio risk adapter
   - reserve accounting and optional loss waterfall integration
+- `InvestorShareToken.sol`: single fixed-supply ERC20 property share token (used as collateral and transferable to secondary holders).
 - `PortfolioRiskRegistry.sol`: segment-level throttles/haircuts and exposure thresholds.
 - `LossWaterfall.sol`: junior/senior capital buckets for bad-debt absorption.
 
@@ -21,7 +22,8 @@ This folder contains the onchain layer for CreditWeave (Sepolia deployment).
 - `script/DeployCreditWeave.s.sol`: deploys core credit stack and wires adapters.
 - `script/DeployAll.s.sol`: full deployment + liquidity seeding + `deployments.json`.
 - `script/TokenizeAsset.s.sol`: registers/tokenizes an asset and configures:
-  - pool token + logic mappings
+  - fixed-supply property share token + asset logic
+  - pool token + logic mappings (single-token collateral path)
   - V2 `setAssetLoanProduct(...)` (if `UNDERWRITING_REGISTRY_V2` provided)
   - portfolio segment assignment (if `PORTFOLIO_RISK_REGISTRY` + `SEGMENT_ID` provided)
 
@@ -56,8 +58,8 @@ Tokenization script inputs (backend route injects these):
 - `NEXT_PUBLIC_LENDING_POOL`
 - `PROPERTY_ADDRESS`
 - `ASSET_VALUE`
-- `RENT_AMOUNT`
 - `ORIGINATOR`
+- Optional: `RENT_AMOUNT` (logic schedule proxy only; defaults if omitted)
 - Optional: `UNDERWRITING_REGISTRY_V2`, `LOAN_PRODUCT` (`1|2|3`)
 - Optional: `PORTFOLIO_RISK_REGISTRY`, `SEGMENT_ID` (`bytes32`)
 
@@ -70,4 +72,3 @@ Tokenization script inputs (backend route injects these):
 cd ..
 npm run sync-artifacts
 ```
-

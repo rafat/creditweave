@@ -11,7 +11,7 @@ export async function POST(request: Request) {
   try {
     const { propertyAddress, assetValue, rentAmount, borrowerAddress, loanProduct, segmentId } = await request.json();
 
-    if (!propertyAddress || !assetValue || !rentAmount || !borrowerAddress) {
+    if (!propertyAddress || !assetValue || !borrowerAddress) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
     }
     const loanProductValue = Number(loanProduct ?? 1);
@@ -47,7 +47,17 @@ export async function POST(request: Request) {
       PRIVATE_KEY: privateKey,
       PROPERTY_ADDRESS: propertyAddress,
       ASSET_VALUE: assetValue.toString(),
-      RENT_AMOUNT: rentAmount.toString(),
+      RENT_AMOUNT:
+        (typeof rentAmount === "string" && rentAmount.length > 0 ? rentAmount : undefined) ??
+        (() => {
+          try {
+            const valueWei = BigInt(assetValue.toString());
+            const derived = valueWei / 200n; // 0.5% monthly proxy for logic schedule only
+            return (derived > 0n ? derived : 1000n * 10n ** 18n).toString();
+          } catch {
+            return (1000n * 10n ** 18n).toString();
+          }
+        })(),
       ORIGINATOR: borrowerAddress,
       LOAN_PRODUCT: loanProductValue.toString(),
       NEXT_PUBLIC_RWA_ASSET_REGISTRY: process.env.NEXT_PUBLIC_RWA_ASSET_REGISTRY || DEPLOYMENTS.rwaAssetRegistry,

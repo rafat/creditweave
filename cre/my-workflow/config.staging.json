@@ -1,9 +1,9 @@
 {
   "schedule": "*/30 * * * * *",
-  "underwritingRegistryAddress": "0x72cA3322d7a2510d7C9e10473BFF4c8A35b5De82",
-  "navOracleAddress": "0x8eDEE6478b117e6665dCAaf7E5d80f80f64799Ed",
-  "lendingPoolAddress": "0x7086b466d04EA2F397a0d2f9d9F33595134187fE",
-  "rwaAssetRegistryAddress": "0xe0198Ee059B0A3a3b7F7447171fa7AF81d081ac1",
+  "underwritingRegistryAddress": "0x63900141D541E537a7ac34ffEC86e0Fcb49cFbf1",
+  "navOracleAddress": "0xCEf7E87d45Cb3d8089eFAa681Aa547B8056dD438",
+  "lendingPoolAddress": "0xEb8c9B9a94c0a44777dC5Fd2951204E43805103C",
+  "rwaAssetRegistryAddress": "0xD33539AF995B92B38F46A9Fd301c0f80D1B977BF",
   "chainRpcUrl": "https://ethereum-sepolia-rpc.publicnode.com",
   "chainId": 11155111,
   "aiModelName": "gemini-3-flash-preview",

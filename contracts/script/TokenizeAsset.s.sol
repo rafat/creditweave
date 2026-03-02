@@ -5,7 +5,6 @@ import "forge-std/Script.sol";
 import "forge-std/console.sol";
 import "../src/RWAAssetRegistry.sol";
 import "../src/RentalCashFlowLogic.sol";
-import "../src/RWARevenueVault.sol";
 import "../src/InvestorShareToken.sol";
 import "../src/RWALendingPool.sol";
 import "../src/RWACommonTypes.sol";
@@ -31,7 +30,6 @@ contract TokenizeAsset is Script {
         require(originator != address(0), "Originator address is required");
 
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
-        address deployer = vm.addr(deployerPrivateKey);
         vm.startBroadcast(deployerPrivateKey);
 
         RWAAssetRegistry registry = RWAAssetRegistry(registryAddress);
@@ -82,45 +80,29 @@ contract TokenizeAsset is Script {
         logic.initialize(initData);
         console.log("Deployed Logic at:", address(logic));
 
-        // 4. Deploy Vault
-        RWARevenueVault vault = new RWARevenueVault();
-        vault.initialize(
-            deployer, // admin
-            deployer, // agent
-            address(logic),
-            address(lendingPool.stablecoin()),
-            address(registry),
-            assetId,
-            deployer  // feeRecipient
-        );
-        console.log("Deployed Vault at:", address(vault));
-
-        // 5. Deploy Token
+        // 4. Deploy single property share token (fixed supply)
         InvestorShareToken token = new InvestorShareToken(
             assetId,
             "CreditWeave Property Share",
             "CWRWA",
-            type(uint256).max, // maxSupply
+            assetValue, // fixed maxSupply for the property
             address(registry),
-            address(vault),
-            deployer // admin
+            originator, // initial holder
+            assetValue // initial fixed supply
         );
         console.log("Deployed Token at:", address(token));
 
-        // Set token in vault
-        vault.setTokenContracts(address(token));
-
-        // 6. Link Contracts
-        registry.linkContracts(assetId, address(logic), address(vault), address(token));
+        // 5. Link Contracts (logic + token)
+        registry.linkContracts(assetId, address(logic), address(token));
         
-        // 7. Activate Asset
+        // 6. Activate Asset
         registry.activateAsset(assetId);
 
-        // 8. Configure Lending Pool
+        // 7. Configure Lending Pool
         lendingPool.setAssetToken(assetId, address(token));
         lendingPool.setAssetLogic(assetId, address(logic));
 
-        // 8.1 Configure Underwriting V2 loan product (optional but recommended)
+        // 7.1 Configure Underwriting V2 loan product (optional but recommended)
         if (underwritingV2Address != address(0)) {
             require(loanProductRaw > 0 && loanProductRaw <= uint256(type(uint8).max), "Invalid loan product");
             UnderwritingRegistryV2(underwritingV2Address).setAssetLoanProduct(
@@ -130,16 +112,11 @@ contract TokenizeAsset is Script {
             console.log("Configured V2 loan product:", loanProductRaw);
         }
 
-        // 8.2 Configure Portfolio Risk segment (optional)
+        // 7.2 Configure Portfolio Risk segment (optional)
         if (portfolioRiskRegistryAddress != address(0) && segmentId != bytes32(0)) {
             PortfolioRiskRegistry(portfolioRiskRegistryAddress).assignAssetSegment(assetId, segmentId);
             console.log("Assigned portfolio segment for asset");
         }
-
-        // 9. Mint shares to the originator
-        // Mint amount is equal to the asset value (1 token per $1 of value)
-        vault.mintShares(originator, assetValue); 
-        console.log("Minted shares equal to value:", assetValue);
 
         vm.stopBroadcast();
         

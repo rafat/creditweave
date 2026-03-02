@@ -73,20 +73,18 @@ contract RWAAssetRegistryTest is Test {
         );
 
         address logic = makeAddr("logic");
-        address vault = makeAddr("vault");
         address token = makeAddr("token");
 
         vm.prank(factory);
-        registry.linkContracts(assetId, logic, vault, token);
+        registry.linkContracts(assetId, logic, token);
 
         vm.prank(compliance);
         registry.activateAsset(assetId);
 
         assertEq(uint256(getCurrentStatus(assetId)), uint256(RWACommonTypes.AssetStatus.ACTIVE));
 
-        (address linkedLogic, address linkedVault, address linkedToken) = registry.getAssetLinks(assetId);
+        (address linkedLogic, address linkedToken) = registry.getAssetLinks(assetId);
         assertEq(linkedLogic, logic);
-        assertEq(linkedVault, vault);
         assertEq(linkedToken, token);
     }
 
@@ -109,7 +107,6 @@ contract RWAAssetRegistryTest is Test {
         registry.linkContracts(
             assetId,
             address(logic),
-            makeAddr("vault"),
             makeAddr("token")
         );
 
@@ -142,7 +139,6 @@ contract RWAAssetRegistryTest is Test {
         registry.linkContracts(
             assetId,
             address(logic),
-            makeAddr("vault"),
             makeAddr("token")
         );
 

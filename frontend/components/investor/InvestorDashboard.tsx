@@ -22,8 +22,8 @@ export default function InvestorDashboard() {
           Portfolio visibility without borrower data exposure.
         </h1>
         <p className="mt-3 max-w-3xl text-sm text-[color:var(--ink-700)] md:text-base">
-          Investors see pool and asset-level onchain signals, plus recent underwriting outcomes. Private borrower
-          financial data remains offchain.
+          Investors and secondary property-share holders see pool and asset-level onchain signals plus recent
+          underwriting outcomes. Private borrower financial data remains offchain.
         </p>
       </section>
 
