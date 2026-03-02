@@ -291,6 +291,8 @@ export default function BorrowForm({ assetIdInput, terms, onTxStateChange }: Pro
   const maxBorrowFromTerms = (approved && creditLimit > 0n && creditLimit < collateralCap) ? creditLimit : collateralCap;
   const remainingBorrowCapacity =
     maxBorrowFromTerms > debtPrincipal ? maxBorrowFromTerms - debtPrincipal : 0n;
+  const safeBorrowCapacity =
+    (remainingBorrowCapacity * BigInt(10_000 - dynamicBufferBps)) / 10_000n;
 
   // Safe deposit math
   const minRequiredCollateralValue = ltvForCapacityBps > 0 ? (creditLimit * 10000n) / BigInt(ltvForCapacityBps) : 0n;
@@ -335,6 +337,23 @@ export default function BorrowForm({ assetIdInput, terms, onTxStateChange }: Pro
     : 0n;
   const pledgedWholeShares = (collateralShares / ONE_SHARE) * ONE_SHARE;
   const withdrawableWholeShares = (withdrawableShares / ONE_SHARE) * ONE_SHARE;
+  // Step 5 safety guard should be based on current active debt (not full approved credit limit).
+  const minSharesToBackCurrentDebt = (effectiveDebtForWithdraw > 0n && nav > 0n && ltvForCapacityBps > 0)
+    ? (((effectiveDebtForWithdraw * 10000n) / BigInt(ltvForCapacityBps)) * 10n**18n) / nav
+    : 0n;
+  const safeDebtBufferTargetSharesRaw =
+    (minSharesToBackCurrentDebt * BigInt(10_000 + dynamicBufferBps)) / 10_000n;
+  const safeDebtBufferTargetWholeShares =
+    ((safeDebtBufferTargetSharesRaw + ONE_SHARE - 1n) / ONE_SHARE) * ONE_SHARE;
+  const maxWithdrawKeepingBufferWholeSharesRaw =
+    pledgedWholeShares > safeDebtBufferTargetWholeShares
+      ? pledgedWholeShares - safeDebtBufferTargetWholeShares
+      : 0n;
+  const maxWithdrawKeepingBufferWholeShares =
+    maxWithdrawKeepingBufferWholeSharesRaw > withdrawableWholeShares
+      ? withdrawableWholeShares
+      : maxWithdrawKeepingBufferWholeSharesRaw;
+  const bufferAlreadyBelowTarget = pledgedWholeShares < safeDebtBufferTargetWholeShares;
   const lockedByDebtWholeShares =
     pledgedWholeShares > withdrawableWholeShares
       ? pledgedWholeShares - withdrawableWholeShares
@@ -706,6 +725,14 @@ export default function BorrowForm({ assetIdInput, terms, onTxStateChange }: Pro
             <span>Total Amount Due</span>
             <span className="text-red-600">${formatCurrency(totalDebt)}</span>
           </div>
+          <div className="flex justify-between border-t pt-2 text-xs text-blue-700">
+            <span>
+              Suggested borrow range ({dynamicBufferLabel.replace(" BUFFER", "")} safety to no safety)
+            </span>
+            <span className="font-semibold">
+              ${formatCurrency(safeBorrowCapacity)} - ${formatCurrency(remainingBorrowCapacity)}
+            </span>
+          </div>
         </div>
       </section>
 
@@ -827,6 +854,22 @@ export default function BorrowForm({ assetIdInput, terms, onTxStateChange }: Pro
               <span className="text-gray-500">Locked by Active Debt:</span>
               <span className="font-semibold text-gray-900">{formatToken(lockedByDebtWholeShares)} RWA Shares</span>
             </div>
+            {approved && (safeDebtBufferTargetWholeShares > 0n || totalDebt > 0n) ? (
+              <div className="flex justify-between border-t pt-1 mt-1">
+                <span className="text-gray-500">
+                  Max Withdraw While Keeping safety BUFFER
+                </span>
+                <span className="font-semibold text-blue-700">
+                  {formatToken(maxWithdrawKeepingBufferWholeShares)} RWA Shares
+                </span>
+              </div>
+            ) : null}
+            {approved && (safeDebtBufferTargetWholeShares > 0n || totalDebt > 0n) && bufferAlreadyBelowTarget ? (
+              <p className="border-t pt-1 mt-1 text-amber-600">
+                Current pledged collateral is below the {dynamicBufferLabel.toLowerCase()} target. Any further withdrawal
+                reduces your safety margin.
+              </p>
+            ) : null}
           </div>
         </div>
       </section>

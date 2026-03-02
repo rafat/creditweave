@@ -158,12 +158,3 @@ cre workflow simulate ./my-workflow -T staging-settings --broadcast
 - CRE overview: `cre/README.md`
 - Workflow internals: `cre/my-workflow/README.md`
 
-## Demo Notes
-
-For a tight hackathon demo:
-- Tokenize asset (choose V2 loan product + segment)
-- Submit underwriting request
-- Run CRE workflow broadcast
-- Show onchain terms and investor risk panels
-- Borrow, repay, withdraw collateral
-- Optional: transfer some property shares to a secondary-holder wallet and show investor transparency view

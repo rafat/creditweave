@@ -1,10 +1,13 @@
 "use client";
 
 import { formatUnits } from "viem";
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { useReadContract } from "wagmi";
+import { useAccount, useChainId, useReadContract } from "wagmi";
 import {
   CONTRACTS,
+  ERC20_ABI,
+  LENDING_POOL_ABI,
   NAV_ORACLE_ABI,
   PORTFOLIO_RISK_REGISTRY_ABI,
   RWA_ASSET_REGISTRY_ABI,
@@ -23,6 +26,8 @@ const toBigInt = (value: string): bigint | null => {
 export default function AssetOverview() {
   const [mounted, setMounted] = useState(false);
   const contracts = CONTRACTS[SUPPORTED_CHAIN_ID];
+  const { address } = useAccount();
+  const chainId = useChainId();
   const [assetIdInput, setAssetIdInput] = useState("1");
   const assetId = useMemo(() => toBigInt(assetIdInput), [assetIdInput]);
 
@@ -92,6 +97,67 @@ export default function AssetOverview() {
     },
   });
 
+  const v2DecisionRead = useReadContract({
+    chainId: SUPPORTED_CHAIN_ID,
+    address: underwritingV2Address,
+    abi: UNDERWRITING_REGISTRY_V2_ABI,
+    functionName: "getDecision",
+    args: address && assetId !== null ? [address, assetId] : undefined,
+    query: {
+      enabled: Boolean(contracts.usesUnderwritingV2 && address && assetId !== null && assetId > 0n),
+      refetchInterval: 30_000,
+    },
+  });
+
+  const v2ApprovedRead = useReadContract({
+    chainId: SUPPORTED_CHAIN_ID,
+    address: underwritingV2Address,
+    abi: UNDERWRITING_REGISTRY_V2_ABI,
+    functionName: "isApproved",
+    args: address && assetId !== null ? [address, assetId] : undefined,
+    query: {
+      enabled: Boolean(contracts.usesUnderwritingV2 && address && assetId !== null && assetId > 0n),
+      refetchInterval: 30_000,
+    },
+  });
+
+  const v2BorrowingTermsRead = useReadContract({
+    chainId: SUPPORTED_CHAIN_ID,
+    address: underwritingV2Address,
+    abi: UNDERWRITING_REGISTRY_V2_ABI,
+    functionName: "getBorrowingTerms",
+    args: address && assetId !== null ? [address, assetId] : undefined,
+    query: {
+      enabled: Boolean(contracts.usesUnderwritingV2 && address && assetId !== null && assetId > 0n),
+      refetchInterval: 30_000,
+    },
+  });
+
+  const tokenAddressRead = useReadContract({
+    chainId: SUPPORTED_CHAIN_ID,
+    address: contracts.lendingPool,
+    abi: LENDING_POOL_ABI,
+    functionName: "assetIdToToken",
+    args: assetId !== null ? [assetId] : [0n],
+    query: {
+      enabled: Boolean(assetId !== null && assetId > 0n),
+      refetchInterval: 30_000,
+    },
+  });
+  const tokenAddress = tokenAddressRead.data as `0x${string}` | undefined;
+
+  const walletShareBalanceRead = useReadContract({
+    chainId: SUPPORTED_CHAIN_ID,
+    address: tokenAddress,
+    abi: ERC20_ABI,
+    functionName: "balanceOf",
+    args: address ? [address] : undefined,
+    query: {
+      enabled: Boolean(address && tokenAddress && tokenAddress !== "0x0000000000000000000000000000000000000000"),
+      refetchInterval: 30_000,
+    },
+  });
+
   const portfolioRiskRegistryAddress = contracts.portfolioRiskRegistry;
   const hasPortfolioRiskRegistry =
     Boolean(portfolioRiskRegistryAddress) &&
@@ -140,6 +206,28 @@ export default function AssetOverview() {
     | undefined;
   const segmentBorrowPaused = segmentConfig ? Boolean(segmentConfig[1]) : false;
   const segmentHaircutBps = segmentConfig ? Number(segmentConfig[2]) : 0;
+  const decision = v2DecisionRead.data as { status?: number; 1?: number } | undefined;
+  const decisionStatus = Number(decision?.status ?? decision?.[1] ?? -1);
+  const isApproved = Boolean(v2ApprovedRead.data);
+  const borrowingTerms = v2BorrowingTermsRead.data as [number, number, bigint, bigint] | undefined;
+  const expiry = borrowingTerms?.[3] ?? 0n;
+  const isExpired = expiry > 0n && expiry <= BigInt(Math.floor(Date.now() / 1000));
+  const shareBalance = (walletShareBalanceRead.data as bigint | undefined) ?? 0n;
+  const hasShares = shareBalance > 0n;
+  const hasConnectedWallet = Boolean(address);
+  const canNavigateToBorrower = hasConnectedWallet && hasShares && chainId === SUPPORTED_CHAIN_ID;
+
+  let underwritingLabel = "No decision yet";
+  if (decisionStatus === 3) underwritingLabel = "Denied";
+  else if (isApproved && isExpired) underwritingLabel = "Expired";
+  else if (isApproved) underwritingLabel = "Approved";
+  else if (decisionStatus >= 0) underwritingLabel = "Not currently approved";
+
+  let nextAction = "Connect wallet to continue.";
+  if (hasConnectedWallet && !hasShares) nextAction = "You need property shares in this wallet first.";
+  else if (hasConnectedWallet && hasShares && !isApproved) nextAction = "Request underwriting before borrowing.";
+  else if (hasConnectedWallet && hasShares && isExpired) nextAction = "Terms expired. Request underwriting refresh.";
+  else if (canNavigateToBorrower) nextAction = "Use as collateral, then deposit and borrow.";
 
   if (!mounted) return null;
 
@@ -235,6 +323,30 @@ export default function AssetOverview() {
             <span className="mono">{(segmentHaircutBps / 100).toFixed(2)}%</span>
           </p>
         </article>
+      </div>
+      <div className="mt-3 rounded-xl border p-4">
+        <p className="mono text-xs text-[color:var(--ink-700)]">USE AS COLLATERAL</p>
+        <p className="mt-2 text-sm">
+          Your wallet share balance: <span className="mono">{formatUnits(shareBalance, 18)}</span>
+        </p>
+        <p className="mt-1 text-sm">
+          Underwriting status: <span className="mono">{underwritingLabel}</span>
+        </p>
+        <p className="mt-1 text-xs text-[color:var(--ink-700)]">{nextAction}</p>
+        <Link
+          href={`/borrower?assetId=${assetIdInput}`}
+          aria-disabled={!canNavigateToBorrower}
+          className={`mt-3 inline-flex rounded-lg px-3 py-2 text-sm font-medium ${
+            canNavigateToBorrower
+              ? "bg-[color:var(--mint-500)] text-white hover:opacity-90"
+              : "cursor-not-allowed border bg-gray-100 text-gray-400"
+          }`}
+          onClick={(e) => {
+            if (!canNavigateToBorrower) e.preventDefault();
+          }}
+        >
+          Use as Collateral
+        </Link>
       </div>
     </section>
   );

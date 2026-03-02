@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { keccak256, parseAbiItem, toHex, zeroAddress } from "viem";
 import { useAccount, useChainId, usePublicClient, useReadContract, useWaitForTransactionReceipt } from "wagmi";
 import AppNav from "@/components/AppNav";
@@ -41,6 +42,7 @@ import AssetSelector from "./AssetSelector";
 
 export default function BorrowerDashboard() {
   const [mounted, setMounted] = useState(false);
+  const searchParams = useSearchParams();
   const { address } = useAccount();
   const currentChainId = useChainId();
   const publicClient = usePublicClient({ chainId: SUPPORTED_CHAIN_ID });
@@ -49,7 +51,13 @@ export default function BorrowerDashboard() {
     setMounted(true);
   }, []);
 
-  const [assetIdInput, setAssetIdInput] = useState("");
+  const initialAssetIdFromQuery = useMemo(() => {
+    const raw = searchParams.get("assetId");
+    if (!raw) return "";
+    const parsed = Number(raw);
+    return Number.isInteger(parsed) && parsed > 0 ? String(parsed) : "";
+  }, [searchParams]);
+  const [assetIdInput, setAssetIdInput] = useState(initialAssetIdFromQuery);
   const [intendedBorrowInput, setIntendedBorrowInput] = useState("100,000");
   const [tx, setTx] = useState<TxState>({ phase: "idle" });
   const [underwritingTxHash, setUnderwritingTxHash] = useState<`0x${string}` | undefined>(undefined);
@@ -336,6 +344,12 @@ export default function BorrowerDashboard() {
       </section>
 
       <section className="grid gap-6">
+        {initialAssetIdFromQuery ? (
+          <div className="rounded-xl border border-[color:var(--mint-300)] bg-[color:var(--mint-100)] px-4 py-3 text-sm text-[color:var(--ink-900)]">
+            Asset <span className="mono">#{initialAssetIdFromQuery}</span> was preselected from the investor page.
+            Request underwriting for this wallet before borrowing.
+          </div>
+        ) : null}
         <AssetSelector 
           selectedAssetId={assetIdInput}
           onSelect={setAssetIdInput}
