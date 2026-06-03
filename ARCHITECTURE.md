@@ -2,7 +2,7 @@
 
 CreditWeave is a privacy-first, onchain Real World Asset (RWA) lending protocol. It replaces traditional, public overcollateralization with a **Confidential Runtime Environment (CRE)** that underwrites borrowers and values assets privately, offchain, using AI and real-world data APIs.
 
-## 🧠 Core Philosophy & Privacy-First Architecture
+## Core Philosophy & Privacy-First Architecture
 
 Traditional DeFi lending requires all data to be public onchain, which is fundamentally incompatible with institutional credit underwriting (which requires sensitive borrower financials, credit histories, and KYC data).
 
@@ -11,7 +11,7 @@ CreditWeave solves this by bifurcating the architecture:
 
 ### Data Classification Model
 
-🟢 **Onchain (Public)**
+**Onchain (Public)**
 *   Asset ID
 *   Decision status (approved/watchlist/denied)
 *   Effective Maximum Loan-to-Value (Max LTV) in Basis Points (Bps)
@@ -23,7 +23,7 @@ CreditWeave solves this by bifurcating the architecture:
 *   Liquidations
 *   Portfolio segment controls (optional, via PortfolioRiskRegistry)
 
-🔴 **Offchain Confidential (Never touches the blockchain)**
+**Offchain Confidential (Never touches the blockchain)**
 *   Borrower income & debt-to-income ratio
 *   Credit scores & past repayment history
 *   KYC/AML compliance data
